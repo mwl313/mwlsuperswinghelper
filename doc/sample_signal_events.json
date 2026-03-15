@@ -1,0 +1,32 @@
+[
+  {
+    "symbol": "005930",
+    "symbol_name": "삼성전자",
+    "signal_type": "buy_candidate",
+    "signal_strength": "strong",
+    "price": 78350.0,
+    "volume": 5120.0,
+    "reason_text": "매수 후보: 20MA가 60MA 위로 추세 우위, 볼린저 중앙선 부근 지지 확인, 거래량 평균 대비 1.83배 증가",
+    "created_at": "2026-03-15T10:42:00+00:00"
+  },
+  {
+    "symbol": "000660",
+    "symbol_name": "SK하이닉스",
+    "signal_type": "breakout",
+    "signal_strength": "strong",
+    "price": 164800.0,
+    "volume": 6900.0,
+    "reason_text": "돌파 감시: 최근 저항 163950.00 상향 돌파, 거래량 2.12배, 추세 필터 통과",
+    "created_at": "2026-03-15T10:51:00+00:00"
+  },
+  {
+    "symbol": "051910",
+    "symbol_name": "LG화학",
+    "signal_type": "sell_warning",
+    "signal_strength": "medium",
+    "price": 389000.0,
+    "volume": 4410.0,
+    "reason_text": "매도 경고: 볼린저 중앙선 하향 이탈, 하락 구간 거래량 1.67배",
+    "created_at": "2026-03-15T11:03:00+00:00"
+  }
+]

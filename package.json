@@ -1,0 +1,17 @@
+{
+  "name": "kospi-swing-signal",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "setup:dev": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap-dev.ps1",
+    "free:ports": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/free-dev-ports.ps1",
+    "dev": "npm run setup:dev && concurrently -k -n API,WEB -c green,blue \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:clean": "npm run free:ports && npm run dev",
+    "dev:api": "services\\api\\.venv\\Scripts\\python -m uvicorn app.main:app --app-dir services\\api --reload --host 127.0.0.1 --port 8000",
+    "dev:web": "npm --prefix apps/web run dev",
+    "build:web": "npm --prefix apps/web run build"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

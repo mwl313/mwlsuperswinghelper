@@ -1,0 +1,78 @@
+import { DashboardSummary, LiveWatchlistItem, SignalLog, StrategySettings, SymbolResolveResult, Watchlist } from "./types";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api";
+
+function getDefaultWsUrl(): string {
+  if (typeof window !== "undefined") {
+    const scheme = window.location.protocol === "https:" ? "wss" : "ws";
+    return `${scheme}://${window.location.host}/ws/live-signals`;
+  }
+  return "ws://127.0.0.1:8000/ws/live-signals";
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers ?? {}),
+    },
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `API error: ${response.status}`);
+  }
+  return (await response.json()) as T;
+}
+
+export function getSummary() {
+  return request<DashboardSummary>("/dashboard/summary");
+}
+
+export function getWatchlists() {
+  return request<Watchlist[]>("/watchlists");
+}
+
+export function getLiveWatchlist() {
+  return request<LiveWatchlistItem[]>("/watchlist/live");
+}
+
+export function addWatchlistItem(watchlistId: number, payload: { symbol: string; symbol_name?: string; enabled: boolean }) {
+  return request(`/watchlists/${watchlistId}/items`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateWatchlistItem(itemId: number, enabled: boolean) {
+  return request(`/watchlists/items/${itemId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+export function deleteWatchlistItem(watchlistId: number, itemId: number) {
+  return request(`/watchlists/${watchlistId}/items/${itemId}`, { method: "DELETE" });
+}
+
+export function getSignals(limit = 100) {
+  return request<SignalLog[]>(`/signals?limit=${limit}`);
+}
+
+export function getSettings() {
+  return request<StrategySettings>("/settings");
+}
+
+export function resolveSymbol(symbol: string) {
+  return request<SymbolResolveResult>(`/symbols/resolve?symbol=${symbol}`);
+}
+
+export function updateSettings(payload: Omit<StrategySettings, "id" | "user_id" | "created_at" | "updated_at">) {
+  return request<StrategySettings>("/settings", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export const WS_URL = process.env.NEXT_PUBLIC_WS_URL || getDefaultWsUrl();
