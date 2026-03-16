@@ -7,7 +7,7 @@ $ErrorActionPreference = "Continue"
 foreach ($port in $Ports) {
   $listeners = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -eq $port }
   if (!$listeners) {
-    Write-Host "[ports] $port: free"
+    Write-Host "[ports] ${port}: free"
     continue
   }
 
@@ -18,9 +18,9 @@ foreach ($port in $Ports) {
     }
     try {
       Stop-Process -Id $procId -Force -ErrorAction Stop
-      Write-Host "[ports] $port: killed pid $procId"
+      Write-Host "[ports] ${port}: killed pid $procId"
     } catch {
-      Write-Host "[ports] $port: failed to kill pid $procId ($($_.Exception.Message))"
+      Write-Host "[ports] ${port}: failed to kill pid $procId ($($_.Exception.Message))"
     }
   }
 }

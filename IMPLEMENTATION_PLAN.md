@@ -50,3 +50,34 @@ Pipeline:
 - AI model inference
 - Advanced portfolio analytics
 - Full backtest framework
+
+## 6) Phase 4 Minimum-Change Plan (Realtime Chart via WS)
+Scope reference: `doc/superswinghelper_roadmap_checklist.md` Phase 4
+
+Backend lifecycle detection:
+- Candle lifecycle is currently handled in `services/api/app/workers/runtime.py` using `CandleAggregator.add_tick(...)`.
+- `add_tick` returns `None` while the current candle is still in-progress.
+- `add_tick` returns a finalized `Candle` when minute bucket rolls over.
+
+Where websocket candle events will be emitted:
+- In `_run_loop` after each tick:
+  - emit `candle_update` using the current in-progress candle (`include_current=True` last candle)
+  - emit `candle_closed` when `add_tick` returns a finalized candle
+- Keep existing `live` and `signal` broadcasts unchanged.
+
+Frontend chart state update strategy:
+- Keep initial REST load (`GET /api/chart/{symbol}`) as the source of full baseline state.
+- In chart tab, open one WS connection while component is mounted.
+- Apply only events for the selected symbol.
+- `candle_update`: update last candle in-place if timestamp matches, otherwise defensively replace/append using timestamp order.
+- `candle_closed`: append or replace without duplicating same timestamp.
+
+Overlay sync strategy:
+- Keep candles as source of truth in chart state.
+- Recalculate MA/Bollinger/RSI overlays from current candle array on each candle event.
+- Do not change backend strategy/signal logic and do not add extra API.
+
+Safety constraints:
+- No WS protocol rewrite; add only new event types.
+- No new backend endpoint.
+- Keep mock mode as default local validation path.

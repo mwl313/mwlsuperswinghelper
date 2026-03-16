@@ -1,4 +1,4 @@
-import { DashboardSummary, LiveWatchlistItem, SignalLog, StrategySettings, SymbolResolveResult, Watchlist } from "./types";
+import { ChartResponse, DashboardSummary, LiveWatchlistItem, SignalLog, StrategySettings, SymbolResolveResult, Watchlist } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api";
 
@@ -73,6 +73,10 @@ export function updateSettings(payload: Omit<StrategySettings, "id" | "user_id" 
     method: "PUT",
     body: JSON.stringify(payload),
   });
+}
+
+export function getChart(symbol: string, limit = 240) {
+  return request<ChartResponse>(`/chart/${symbol}?limit=${limit}`);
 }
 
 export const WS_URL = process.env.NEXT_PUBLIC_WS_URL || getDefaultWsUrl();

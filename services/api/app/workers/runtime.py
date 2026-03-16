@@ -34,6 +34,22 @@ class MarketRuntime:
         self.latest_quotes: dict[str, dict] = {}
         self.recent_signals: deque[dict] = deque(maxlen=200)
 
+    @staticmethod
+    def _candle_event_payload(event_type: str, symbol: str, candle: Candle) -> dict:
+        return {
+            "type": event_type,
+            "symbol": symbol,
+            "timeframe": "1m",
+            "candle": {
+                "timestamp": candle.timestamp.isoformat(),
+                "open": candle.open,
+                "high": candle.high,
+                "low": candle.low,
+                "close": candle.close,
+                "volume": candle.volume,
+            },
+        }
+
     def _build_provider(self) -> MarketDataProvider:
         if self.settings.market_data_provider == "kis":
             return KoreaInvestmentAdapter(
@@ -173,8 +189,15 @@ class MarketRuntime:
                 await self.ws_manager.broadcast({"type": "live", "data": quote_payload})
 
                 closed = self.aggregator.add_tick(tick)
+                current_candles = self.aggregator.get_recent_candles(tick.symbol, include_current=True)
+                if current_candles:
+                    current_candle = current_candles[-1]
+                    await self.ws_manager.broadcast(self._candle_event_payload("candle_update", tick.symbol, current_candle))
+
                 if closed is None:
                     continue
+
+                await self.ws_manager.broadcast(self._candle_event_payload("candle_closed", tick.symbol, closed))
                 candles = self.aggregator.get_recent_candles(tick.symbol, include_current=False)
                 await self._handle_closed_candle(
                     symbol=tick.symbol,

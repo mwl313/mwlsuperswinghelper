@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import dashboard, settings, signals, symbols, watchlists, ws
+from app.api import chart, dashboard, settings, signals, symbols, watchlists, ws
 from app.core.config import get_settings
 from app.db.seed import init_db
 from app.services.ws_manager import WSManager
@@ -38,6 +38,7 @@ app.add_middleware(
 app.include_router(watchlists.router, prefix=settings_obj.api_prefix)
 app.include_router(settings.router, prefix=settings_obj.api_prefix)
 app.include_router(signals.router, prefix=settings_obj.api_prefix)
+app.include_router(chart.router, prefix=settings_obj.api_prefix)
 app.include_router(symbols.router, prefix=settings_obj.api_prefix)
 app.include_router(dashboard.router, prefix=settings_obj.api_prefix)
 app.include_router(ws.router)

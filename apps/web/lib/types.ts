@@ -89,3 +89,51 @@ export type SymbolResolveResult = {
   found: boolean;
   source: string;
 };
+
+export type ChartCandle = {
+  timestamp: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+};
+
+export type ChartOverlayPoint = {
+  timestamp: string;
+  value: number;
+};
+
+export type ChartOverlays = {
+  ma20: ChartOverlayPoint[];
+  ma60: ChartOverlayPoint[];
+  bollinger_upper: ChartOverlayPoint[];
+  bollinger_mid: ChartOverlayPoint[];
+  bollinger_lower: ChartOverlayPoint[];
+  rsi14: ChartOverlayPoint[];
+};
+
+export type ChartMarker = {
+  timestamp: string;
+  type: SignalType;
+  strength: SignalStrength;
+  title: string;
+  description: string;
+};
+
+export type ChartResponse = {
+  symbol: string;
+  timeframe: "1m";
+  candles: ChartCandle[];
+  overlays: ChartOverlays;
+  markers: ChartMarker[];
+};
+
+export type CandleEventType = "candle_update" | "candle_closed";
+
+export type CandleWsEvent = {
+  type: CandleEventType;
+  symbol: string;
+  timeframe: "1m";
+  candle: ChartCandle;
+};

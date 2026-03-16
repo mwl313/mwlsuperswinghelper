@@ -2,7 +2,12 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
-import { SignalPill } from "@/components/SignalPill";
+import { ChartSection } from "@/components/chart/ChartSection";
+import { SummarySection } from "@/components/dashboard/SummarySection";
+import { AppTabKey, AppTabs } from "@/components/layout/AppTabs";
+import { SettingsSection, type EditableStrategySettings } from "@/components/settings/SettingsSection";
+import { SignalsSection } from "@/components/signals/SignalsSection";
+import { WatchlistSection } from "@/components/watchlist/WatchlistSection";
 import {
   WS_URL,
   addWatchlistItem,
@@ -16,16 +21,7 @@ import {
   updateSettings,
   updateWatchlistItem,
 } from "@/lib/api";
-import {
-  DashboardSummary,
-  LiveSignalEvent,
-  LiveWatchlistItem,
-  SignalLog,
-  SignalType,
-  StrategySettings,
-  Watchlist,
-  WatchlistItem,
-} from "@/lib/types";
+import { DashboardSummary, LiveSignalEvent, LiveWatchlistItem, SignalLog, SignalType, StrategySettings, Watchlist, WatchlistItem } from "@/lib/types";
 
 const signalTypeText: Record<SignalType, string> = {
   buy_candidate: "매수 후보",
@@ -42,23 +38,28 @@ const EMPTY_SUMMARY: DashboardSummary = {
   watchlist_enabled: 0,
 };
 
-function numberFormat(value: number | null | undefined) {
-  if (value === null || value === undefined) return "-";
-  return value.toLocaleString("ko-KR", { maximumFractionDigits: 2 });
-}
+const TABS: { key: AppTabKey; label: string }[] = [
+  { key: "overview", label: "개요" },
+  { key: "watchlist", label: "워치리스트" },
+  { key: "chart", label: "차트" },
+  { key: "signals", label: "시그널" },
+  { key: "settings", label: "설정" },
+];
 
-function asEditableSettings(settings: StrategySettings) {
+function asEditableSettings(settings: StrategySettings): EditableStrategySettings {
   const { id, user_id, created_at, updated_at, ...rest } = settings;
   return rest;
 }
 
 export default function HomePage() {
+  const [activeTab, setActiveTab] = useState<AppTabKey>("overview");
+  const [selectedChartSymbol, setSelectedChartSymbol] = useState<string | null>(null);
   const [summary, setSummary] = useState<DashboardSummary>(EMPTY_SUMMARY);
   const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
   const [liveRows, setLiveRows] = useState<LiveWatchlistItem[]>([]);
   const [signals, setSignals] = useState<SignalLog[]>([]);
   const [settings, setSettings] = useState<StrategySettings | null>(null);
-  const [formSettings, setFormSettings] = useState<ReturnType<typeof asEditableSettings> | null>(null);
+  const [formSettings, setFormSettings] = useState<EditableStrategySettings | null>(null);
   const [newSymbol, setNewSymbol] = useState("");
   const [resolvedSymbolName, setResolvedSymbolName] = useState<string | null>(null);
   const [isResolvingSymbol, setIsResolvingSymbol] = useState(false);
@@ -74,6 +75,39 @@ export default function HomePage() {
     }
     return map;
   }, [currentWatchlist]);
+
+  const chartSymbols = useMemo(
+    () =>
+      currentWatchlist?.items.map((item) => ({
+        symbol: item.symbol,
+        symbol_name: item.symbol_name,
+      })) ?? [],
+    [currentWatchlist]
+  );
+
+  const liveRowMap = useMemo(() => {
+    return new Map(liveRows.map((row) => [row.symbol, row]));
+  }, [liveRows]);
+
+  const latestSignalMap = useMemo(() => {
+    const map = new Map<string, SignalLog>();
+    for (const row of signals) {
+      if (!map.has(row.symbol)) {
+        map.set(row.symbol, row);
+      }
+    }
+    return map;
+  }, [signals]);
+
+  useEffect(() => {
+    if (chartSymbols.length === 0) {
+      setSelectedChartSymbol(null);
+      return;
+    }
+    if (!selectedChartSymbol || !chartSymbols.some((row) => row.symbol === selectedChartSymbol)) {
+      setSelectedChartSymbol(chartSymbols[0].symbol);
+    }
+  }, [chartSymbols, selectedChartSymbol]);
 
   async function refreshStatic() {
     try {
@@ -262,267 +296,49 @@ export default function HomePage() {
     await Notification.requestPermission();
   }
 
+  function onOpenChart(symbol: string) {
+    setSelectedChartSymbol(symbol);
+    setActiveTab("chart");
+  }
+
   return (
     <main className="mx-auto w-full max-w-7xl p-4 pb-10 md:p-8">
-      <header className="card pulse mb-6 p-5 md:p-6">
-        <p className="mb-1 text-xs uppercase tracking-[0.2em] text-[#8a6d48]">KOSPI Swing Signal MVP</p>
-        <h1 className="mb-2 text-2xl font-bold md:text-3xl">초보 부업 투자자를 위한 신호 대시보드</h1>
-        <p className="text-sm text-[#496466]">
-          이 앱은 자동매매가 아닌 참고용 시그널 알림기입니다. 신호 이유를 확인하고 최종 판단은 직접 진행하세요.
-        </p>
-        {error ? <p className="mt-2 text-sm text-[#a4302d]">오류: {error}</p> : null}
-      </header>
+      <AppTabs tabs={TABS} activeTab={activeTab} onChange={setActiveTab} />
+      {error ? <p className="mb-4 text-sm text-[#a4302d]">오류: {error}</p> : null}
 
-      <section className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        <div className="card p-4">
-          <p className="text-xs text-[#7a6a51]">장 상태</p>
-          <p className="mt-2 text-xl font-bold">{summary.market_status}</p>
-        </div>
-        <div className="card p-4">
-          <p className="text-xs text-[#7a6a51]">오늘 알림 수</p>
-          <p className="mt-2 text-xl font-bold">{summary.today_signal_count}</p>
-        </div>
-        <div className="card p-4">
-          <p className="text-xs text-[#7a6a51]">강한 신호</p>
-          <p className="mt-2 text-xl font-bold">{summary.strong_signal_count}</p>
-        </div>
-        <div className="card p-4">
-          <p className="text-xs text-[#7a6a51]">감시 종목</p>
-          <p className="mt-2 text-xl font-bold">{summary.watchlist_enabled} / {summary.watchlist_total}</p>
-        </div>
-        <div className="card p-4">
-          <p className="text-xs text-[#7a6a51]">강한 신호 종목</p>
-          <p className="mt-2 text-sm font-semibold">{summary.strong_symbols.join(", ") || "없음"}</p>
-        </div>
-      </section>
+      {activeTab === "overview" ? (
+        <SummarySection summary={summary} error={null} onEnableDesktopAlert={onEnableDesktopAlert} />
+      ) : null}
 
-      <section className="mb-6 grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
-        <div className="card p-4 md:p-5">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-bold">워치리스트</h2>
-            <p className="text-xs text-[#7a6a51]">종목별 최근 신호와 감시 상태</p>
-          </div>
+      {activeTab === "watchlist" ? (
+        <WatchlistSection
+          liveRows={liveRows}
+          watchlistItemMap={watchlistItemMap}
+          newSymbol={newSymbol}
+          resolvedSymbolName={resolvedSymbolName}
+          isResolvingSymbol={isResolvingSymbol}
+          symbolLookupMessage={symbolLookupMessage}
+          onSymbolChange={setNewSymbol}
+          onAddSymbol={onAddSymbol}
+          onToggleItem={onToggleItem}
+          onDeleteItem={onDeleteItem}
+          onOpenChart={onOpenChart}
+        />
+      ) : null}
 
-          <div className="overflow-auto">
-            <table className="w-full min-w-[640px] text-left text-sm">
-              <thead>
-                <tr className="border-b border-[#d4c4aa] text-xs text-[#7a6a51]">
-                  <th className="pb-2">종목</th>
-                  <th className="pb-2">현재가</th>
-                  <th className="pb-2">변동률</th>
-                  <th className="pb-2">최근 신호</th>
-                  <th className="pb-2">감시</th>
-                  <th className="pb-2">관리</th>
-                </tr>
-              </thead>
-              <tbody>
-                {liveRows.map((row) => {
-                  const item = watchlistItemMap.get(row.symbol);
-                  return (
-                    <tr key={row.symbol} className="border-b border-[#eadcc8] align-top">
-                      <td className="py-2">
-                        <div className="font-semibold">{row.symbol_name}</div>
-                        <div className="text-xs text-[#7a6a51]">{row.symbol}</div>
-                      </td>
-                      <td className="py-2">{numberFormat(row.price)}</td>
-                      <td className={`py-2 ${row.change_percent && row.change_percent < 0 ? "text-[#a4302d]" : "text-[#1f7a59]"}`}>
-                        {row.change_percent !== null ? `${row.change_percent.toFixed(2)}%` : "-"}
-                      </td>
-                      <td className="py-2">
-                        {row.last_signal_type && row.last_signal_strength ? (
-                          <div className="space-y-1">
-                            <SignalPill type={row.last_signal_type} strength={row.last_signal_strength} />
-                            <p className="max-w-[340px] text-xs text-[#496466]">{row.last_signal_reason}</p>
-                          </div>
-                        ) : (
-                          <span className="text-xs text-[#7a6a51]">최근 신호 없음</span>
-                        )}
-                      </td>
-                      <td className="py-2">{item?.enabled ? "ON" : "OFF"}</td>
-                      <td className="py-2">
-                        <div className="flex gap-2">
-                          {item ? (
-                            <>
-                              <button
-                                className="rounded-md border border-[#c9b89c] px-2 py-1 text-xs"
-                                onClick={() => void onToggleItem(item)}
-                              >
-                                {item.enabled ? "감시 끄기" : "감시 켜기"}
-                              </button>
-                              <button
-                                className="rounded-md border border-[#c9b89c] px-2 py-1 text-xs"
-                                onClick={() => void onDeleteItem(item)}
-                              >
-                                삭제
-                              </button>
-                            </>
-                          ) : null}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          <form className="mt-4 flex flex-col gap-2 sm:flex-row" onSubmit={onAddSymbol}>
-            <input
-              className="rounded-md border border-[#c9b89c] bg-white px-3 py-2 text-sm"
-              placeholder="종목코드"
-              value={newSymbol}
-              onChange={(e) => setNewSymbol(e.target.value)}
-            />
-            <button
-              className="rounded-md bg-[#113c3a] px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#6b8f8d]"
-              disabled={isResolvingSymbol || newSymbol.length !== 6 || !resolvedSymbolName}
-            >
-              종목 추가
-            </button>
-          </form>
-          <p className={`mt-2 text-xs ${resolvedSymbolName ? "text-[#1f7a59]" : "text-[#7a6a51]"}`}>
-            {isResolvingSymbol ? "종목명 확인 중..." : symbolLookupMessage}
-          </p>
-        </div>
-
-        <div className="space-y-4">
-          <div className="card p-4 md:p-5">
-            <h2 className="mb-2 text-lg font-bold">용어 도움말</h2>
-            <ul className="space-y-2 text-sm">
-              <li><b>매수 후보</b>: 추세/거래량/지지 조건이 맞아 관심 있게 볼 구간</li>
-              <li><b>돌파 감시</b>: 최근 저항선을 넘어서는지 확인할 구간</li>
-              <li><b>매도 경고</b>: 추세 약화 또는 지지 이탈로 리스크가 커진 구간</li>
-            </ul>
-          </div>
-          <div className="card p-4 md:p-5">
-            <h2 className="mb-2 text-lg font-bold">알림 안내</h2>
-            <p className="mb-3 text-sm text-[#496466]">
-              같은 종목의 같은 신호는 쿨다운 시간 동안 중복 알림이 제한됩니다.
-            </p>
-            <button className="rounded-md border border-[#c9b89c] px-3 py-2 text-sm" onClick={() => void onEnableDesktopAlert()}>
-              브라우저 알림 권한 요청
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <section className="mb-6 grid gap-4 lg:grid-cols-[0.92fr_1.08fr]">
-        <form className="card p-4 md:p-5" onSubmit={onSaveSettings}>
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-bold">설정</h2>
-            <p className="text-xs text-[#7a6a51]">전략식 직접 입력 없이 파라미터만 조정</p>
-          </div>
-
-          {formSettings ? (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="text-sm">
-                단기 MA
-                <input
-                  type="number"
-                  className="mt-1 w-full rounded-md border border-[#c9b89c] bg-white px-2 py-1"
-                  value={formSettings.ma_short}
-                  onChange={(e) => setFormSettings({ ...formSettings, ma_short: Number(e.target.value) })}
-                />
-              </label>
-              <label className="text-sm">
-                장기 MA
-                <input
-                  type="number"
-                  className="mt-1 w-full rounded-md border border-[#c9b89c] bg-white px-2 py-1"
-                  value={formSettings.ma_long}
-                  onChange={(e) => setFormSettings({ ...formSettings, ma_long: Number(e.target.value) })}
-                />
-              </label>
-              <label className="text-sm">
-                볼린저 길이
-                <input
-                  type="number"
-                  className="mt-1 w-full rounded-md border border-[#c9b89c] bg-white px-2 py-1"
-                  value={formSettings.bollinger_length}
-                  onChange={(e) => setFormSettings({ ...formSettings, bollinger_length: Number(e.target.value) })}
-                />
-              </label>
-              <label className="text-sm">
-                볼린저 표준편차
-                <input
-                  type="number"
-                  step="0.1"
-                  className="mt-1 w-full rounded-md border border-[#c9b89c] bg-white px-2 py-1"
-                  value={formSettings.bollinger_std}
-                  onChange={(e) => setFormSettings({ ...formSettings, bollinger_std: Number(e.target.value) })}
-                />
-              </label>
-              <label className="text-sm">
-                거래량 배수
-                <input
-                  type="number"
-                  step="0.1"
-                  className="mt-1 w-full rounded-md border border-[#c9b89c] bg-white px-2 py-1"
-                  value={formSettings.volume_multiplier}
-                  onChange={(e) => setFormSettings({ ...formSettings, volume_multiplier: Number(e.target.value) })}
-                />
-              </label>
-              <label className="text-sm">
-                중복 알림 제한(분)
-                <input
-                  type="number"
-                  className="mt-1 w-full rounded-md border border-[#c9b89c] bg-white px-2 py-1"
-                  value={formSettings.cooldown_minutes}
-                  onChange={(e) => setFormSettings({ ...formSettings, cooldown_minutes: Number(e.target.value) })}
-                />
-              </label>
-
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={formSettings.use_trend_filter} onChange={(e) => setFormSettings({ ...formSettings, use_trend_filter: e.target.checked })} /> 추세 필터</label>
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={formSettings.use_bollinger_support} onChange={(e) => setFormSettings({ ...formSettings, use_bollinger_support: e.target.checked })} /> 볼린저 중앙선 지지</label>
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={formSettings.use_volume_surge} onChange={(e) => setFormSettings({ ...formSettings, use_volume_surge: e.target.checked })} /> 거래량 급증</label>
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={formSettings.use_breakout} onChange={(e) => setFormSettings({ ...formSettings, use_breakout: e.target.checked })} /> 돌파 신호</label>
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={formSettings.use_rsi} onChange={(e) => setFormSettings({ ...formSettings, use_rsi: e.target.checked })} /> RSI 보조 사용</label>
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={formSettings.enable_telegram_notifications} onChange={(e) => setFormSettings({ ...formSettings, enable_telegram_notifications: e.target.checked })} /> 텔레그램 알림</label>
-
-              <label className="text-sm sm:col-span-2">
-                알림 강도
-                <select
-                  className="mt-1 w-full rounded-md border border-[#c9b89c] bg-white px-2 py-1"
-                  value={formSettings.signal_strength_mode}
-                  onChange={(e) => setFormSettings({ ...formSettings, signal_strength_mode: e.target.value as "all" | "strong_only" })}
-                >
-                  <option value="strong_only">강한 신호만</option>
-                  <option value="all">모든 신호</option>
-                </select>
-              </label>
-
-              <div className="sm:col-span-2">
-                <button className="rounded-md bg-[#113c3a] px-4 py-2 text-sm font-semibold text-white">설정 저장</button>
-              </div>
-            </div>
-          ) : (
-            <p className="text-sm text-[#7a6a51]">설정 불러오는 중...</p>
-          )}
-        </form>
-
-        <div className="card p-4 md:p-5">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-bold">시그널 로그</h2>
-            <p className="text-xs text-[#7a6a51]">최근 발생 순</p>
-          </div>
-          <div className="max-h-[500px] space-y-3 overflow-auto pr-1">
-            {signals.map((sig) => (
-              <article key={`${sig.id ?? "ws"}-${sig.symbol}-${sig.created_at}`} className="rounded-xl border border-[#d8c9ae] bg-white p-3">
-                <div className="mb-2 flex items-center justify-between">
-                  <div>
-                    <p className="font-semibold">{sig.symbol_name} ({sig.symbol})</p>
-                    <p className="text-xs text-[#7a6a51]">{new Date(sig.created_at).toLocaleString("ko-KR")}</p>
-                  </div>
-                  <SignalPill type={sig.signal_type} strength={sig.signal_strength} />
-                </div>
-                <p className="mb-2 text-sm text-[#304b4e]">{sig.reason_text}</p>
-                <p className="text-xs text-[#7a6a51]">현재가 {numberFormat(sig.price)} / 거래량 {numberFormat(sig.volume)}</p>
-              </article>
-            ))}
-            {signals.length === 0 ? <p className="text-sm text-[#7a6a51]">아직 시그널이 없습니다.</p> : null}
-          </div>
-        </div>
-      </section>
+      {activeTab === "chart" ? (
+        <ChartSection
+          symbols={chartSymbols}
+          selectedSymbol={selectedChartSymbol}
+          onSelectSymbol={setSelectedChartSymbol}
+          liveQuote={selectedChartSymbol ? (liveRowMap.get(selectedChartSymbol) ?? null) : null}
+          recentSignal={selectedChartSymbol ? (latestSignalMap.get(selectedChartSymbol) ?? null) : null}
+        />
+      ) : null}
+      {activeTab === "signals" ? <SignalsSection signals={signals} /> : null}
+      {activeTab === "settings" ? (
+        <SettingsSection formSettings={formSettings} onChange={setFormSettings} onSave={onSaveSettings} />
+      ) : null}
     </main>
   );
 }

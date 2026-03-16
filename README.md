@@ -18,6 +18,41 @@
   - 파일 기반 KRX 심볼맵(`services/api/app/data/krx_symbol_map.json`) 우선 조회
   - 조회 API: `GET /api/symbols/resolve?symbol=005930`
 - 브라우저는 `http://localhost:3000`만 접속하면 됨 (`/api`, `/ws`는 Next 리라이트 프록시)
+- Phase 1 UI 정보구조 정리 완료(기능 추가 없음)
+  - 메인 화면을 `개요 / 워치리스트 / 차트 / 시그널 / 설정` 탭으로 분리
+  - `apps/web/app/page.tsx`의 비대해진 UI를 섹션 컴포넌트로 분리
+  - 차트 탭은 placeholder만 제공(실제 차트/새 API 미구현 유지)
+- Phase 3 차트 데이터 계층 추가(백엔드 API + 타입만, UI 미구현)
+  - 신규 엔드포인트: `GET /api/chart/{symbol}?limit=240`
+  - 응답: 1분봉 `candles`, 지표 `overlays(ma20/ma60/bollinger/rsi14)`, 시그널 `markers`
+  - 기존 mock 런타임/시그널 엔진 로직은 유지하고 집계된 캔들/저장된 시그널을 재사용
+- 차트 탭 UI 추가(백엔드 기존 chart API 사용)
+  - `lightweight-charts` 기반 캔들/거래량 표시
+  - MA20/MA60/Bollinger 오버레이 표시
+  - RSI 표시 토글, 시그널 마커 토글
+  - 워치리스트 종목 클릭 시 차트 탭 이동 + 선택 종목 로드
+  - REST 재조회(5초) 방식으로 차트 데이터 갱신
+- Phase 4 실시간 차트 업데이트(REST + WebSocket)
+  - 초기 로드: `GET /api/chart/{symbol}`
+  - 증분 갱신: `WS /ws/live-signals`의 `candle_update`, `candle_closed`
+  - mock 모드에서 API 키 없이 로컬 실시간 갱신 검증 가능
+
+## 0.1 Phase 1 UI 정보구조 정리 (로드맵 기준)
+
+- 작업 범위:
+  - 탭 구조 도입 및 기존 화면 섹션 분리
+  - 기존 API 호출/시그널/워치리스트/설정 동작 유지
+- 작업 제외:
+  - 차트 라이브러리 추가 없음
+  - 백엔드 엔드포인트 추가 없음
+  - 전략 로직/설정 모델 변경 없음
+- 주요 프론트 파일:
+  - `apps/web/components/layout/AppTabs.tsx`
+  - `apps/web/components/dashboard/SummarySection.tsx`
+  - `apps/web/components/watchlist/WatchlistSection.tsx`
+  - `apps/web/components/chart/ChartSection.tsx` (placeholder)
+  - `apps/web/components/signals/SignalsSection.tsx`
+  - `apps/web/components/settings/SettingsSection.tsx`
 
 ## 1. 프로젝트 구조
 
@@ -98,7 +133,20 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - `GET /api/settings`
 - `PUT /api/settings`
 - `GET /api/signals`
+- `GET /api/chart/{symbol}?limit=240`
 - `WS /ws/live-signals`
+
+차트 API 빠른 테스트:
+```bash
+curl "http://127.0.0.1:8000/api/chart/005930?limit=240"
+```
+- `candles`: 1분봉 OHLCV 배열
+- `overlays`: `ma20`, `ma60`, `bollinger_upper/mid/lower`, `rsi14` 시계열
+- `markers`: 최근 시그널 로그의 차트 마커(매수 후보/돌파 감시/매도 경고)
+
+실시간 차트 이벤트(WS):
+- `candle_update`: 진행 중 1분봉 OHLCV 갱신
+- `candle_closed`: 1분봉 마감 확정
 
 ## 4. 프론트엔드 실행 (Next.js)
 
@@ -182,3 +230,4 @@ PostgreSQL로 교체하려면 `.env`에서 `DATABASE_URL`만 변경하면 됩니
 2. 프론트 실행 후 대시보드에서 워치리스트/시그널 로그가 보이는지 확인
 3. 1~2분 내 mock 데이터로 시그널이 누적되는지 확인
 4. 워치리스트 입력칸에 6자리 종목코드를 입력하면 종목명이 자동으로 표시되는지 확인
+5. 차트 탭에서 초기 REST 로드 후 `candle_update`/`candle_closed` 이벤트에 따라 현재 봉이 갱신되고 새 봉이 추가되는지 확인
