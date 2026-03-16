@@ -36,6 +36,16 @@
   - 초기 로드: `GET /api/chart/{symbol}`
   - 증분 갱신: `WS /ws/live-signals`의 `candle_update`, `candle_closed`
   - mock 모드에서 API 키 없이 로컬 실시간 갱신 검증 가능
+- Phase 7 캔들 히스토리 보강(지속성 + 재시작 복구)
+  - closed candle(1분봉)만 DB에 영속 저장 (`candles_1m`)
+  - 중복 방지 키: `(symbol, timeframe, timestamp)` unique
+  - 차트 API는 저장소 closed candles + 메모리 current candle을 병합해 응답
+  - 백엔드 재시작 후에도 기존 closed candles 히스토리 복구 가능
+- 차트 탭 UI 폴리시(정보구조/가독성 개선, 기능 유지)
+  - 대형 요약 카드 대신 종목 헤더 바(종목/현재가/변동률/최근 시그널/마지막 반영 시간)
+  - 체크박스 중심 조작부를 컴팩트 툴바(심볼 선택, RSI/시그널 토글, 새로고침)로 정리
+  - 가격 차트를 메인 포커스로 강조하고, 거래량/RSI/최근 신호 설명을 분리 패널화
+  - 차트 마커 텍스트를 축약해 캔들 가독성 개선(상세 이유는 별도 패널 제공)
 
 ## 0.1 Phase 1 UI 정보구조 정리 (로드맵 기준)
 
@@ -148,6 +158,19 @@ curl "http://127.0.0.1:8000/api/chart/005930?limit=240"
 - `candle_update`: 진행 중 1분봉 OHLCV 갱신
 - `candle_closed`: 1분봉 마감 확정
 
+차트 히스토리 소스(Phase 7):
+- `candles_1m` 테이블의 persisted closed candles
+- 런타임 메모리의 현재 진행 중 candle(있을 때만)
+- API 조립 시 timestamp 기준 정렬/중복 제거 후 `candles` 반환
+
+mock 시간 싱크 주의사항:
+- mock은 `1초=1분`으로 가상 시간을 빠르게 전진시킵니다.
+- 이전 실행에서 DB(`app.db`)에 더 미래 시각의 봉이 남아 있으면, 재시작 직후 차트가 잠시 멈춘 것처럼 보일 수 있습니다.
+  - 원인: REST로 읽은 마지막 봉 시각 > 현재 mock WS 봉 시각
+  - 결과: 프론트가 과거 시각 이벤트를 무시
+- 이 현상은 mock 개발 환경에서 주로 발생하며, 실브로커 production 환경에서는 일반적으로 발생하지 않습니다.
+- 로컬에서 바로 초기화하려면 백엔드 중지 후 `app.db`(또는 `services/api/app.db`, 실행 위치 기준)를 정리하고 재시작하세요.
+
 ## 4. 프론트엔드 실행 (Next.js)
 
 작업 폴더:
@@ -199,6 +222,7 @@ npm run dev:clean
 
 기본은 SQLite:
 - `services/api/app.db` (실행 위치 기준)
+- Phase 7부터 `candles_1m` 테이블에 closed candle이 누적 저장됨
 
 PostgreSQL로 교체하려면 `.env`에서 `DATABASE_URL`만 변경하면 됩니다.
 
@@ -231,3 +255,4 @@ PostgreSQL로 교체하려면 `.env`에서 `DATABASE_URL`만 변경하면 됩니
 3. 1~2분 내 mock 데이터로 시그널이 누적되는지 확인
 4. 워치리스트 입력칸에 6자리 종목코드를 입력하면 종목명이 자동으로 표시되는지 확인
 5. 차트 탭에서 초기 REST 로드 후 `candle_update`/`candle_closed` 이벤트에 따라 현재 봉이 갱신되고 새 봉이 추가되는지 확인
+6. 백엔드 재시작 후에도 `GET /api/chart/{symbol}`에서 이전 closed candles가 유지되는지 확인
