@@ -191,6 +191,10 @@ class MarketRuntime:
     async def _seed_symbol_history(self, symbol: str) -> None:
         # 1) Reuse persisted history first.
         persisted = self._load_recent_closed_candles(symbol=symbol, limit=self.settings.kis_history_seed_limit)
+        if persisted and isinstance(self.provider, MockMarketDataProvider):
+            # In mock mode, continue from latest persisted timestamp so chart time and tick time stay aligned.
+            self.provider.align_virtual_time(persisted[-1].timestamp)
+
         if len(persisted) >= min(self.settings.kis_history_seed_limit, 60):
             self.aggregator.seed_closed_candles(symbol=symbol, candles=persisted)
             self.history_seeded_symbols.add(symbol)
@@ -218,6 +222,8 @@ class MarketRuntime:
             )
 
         merged = self._load_recent_closed_candles(symbol=symbol, limit=self.settings.kis_history_seed_limit)
+        if merged and isinstance(self.provider, MockMarketDataProvider):
+            self.provider.align_virtual_time(merged[-1].timestamp)
         if merged:
             self.aggregator.seed_closed_candles(symbol=symbol, candles=merged)
         self.history_seeded_symbols.add(symbol)

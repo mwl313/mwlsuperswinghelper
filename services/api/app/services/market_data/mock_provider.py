@@ -19,6 +19,12 @@ class MockMarketDataProvider(MarketDataProvider):
         self._rand = random.Random(42)
         self._virtual_market_time = datetime.now(timezone.utc).replace(second=0, microsecond=0)
 
+    def align_virtual_time(self, timestamp: datetime) -> None:
+        ts = timestamp if timestamp.tzinfo else timestamp.replace(tzinfo=timezone.utc)
+        aligned = ts.astimezone(timezone.utc).replace(second=0, microsecond=0)
+        if aligned > self._virtual_market_time:
+            self._virtual_market_time = aligned
+
     async def get_ticks(self, symbols: list[str]) -> list[Tick]:
         if not symbols:
             await asyncio.sleep(self.interval_seconds)
