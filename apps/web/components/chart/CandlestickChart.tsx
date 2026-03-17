@@ -58,6 +58,7 @@ export function CandlestickChart({
       layout: {
         background: { type: ColorType.Solid, color: "#ffffff" },
         textColor: "#516579",
+        attributionLogo: false,
       },
       grid: {
         vertLines: { color: "#f1f5f9" },

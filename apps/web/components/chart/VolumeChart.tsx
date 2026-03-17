@@ -50,6 +50,7 @@ export function VolumeChart({ volumeData, rsiData, showRsi }: VolumeChartProps) 
       layout: {
         background: { type: ColorType.Solid, color: "#ffffff" },
         textColor: "#516579",
+        attributionLogo: false,
       },
       grid: {
         vertLines: { color: "#f1f5f9" },
@@ -119,6 +120,7 @@ export function VolumeChart({ volumeData, rsiData, showRsi }: VolumeChartProps) 
       layout: {
         background: { type: ColorType.Solid, color: "#ffffff" },
         textColor: "#516579",
+        attributionLogo: false,
       },
       grid: {
         vertLines: { color: "#f1f5f9" },
