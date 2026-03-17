@@ -70,3 +70,26 @@ class CandleAggregator:
         if include_current and symbol in self._current:
             candles.append(self._current[symbol])
         return candles
+
+    def get_current_candle(self, symbol: str) -> Candle | None:
+        return self._current.get(symbol)
+
+    def seed_closed_candles(self, symbol: str, candles: list[Candle]) -> None:
+        indexed: dict[datetime, Candle] = {}
+        for candle in candles:
+            indexed[candle.timestamp] = Candle(
+                symbol=symbol,
+                timestamp=candle.timestamp,
+                open=candle.open,
+                high=candle.high,
+                low=candle.low,
+                close=candle.close,
+                volume=candle.volume,
+            )
+
+        ordered = sorted(indexed.values(), key=lambda row: row.timestamp)
+        history = deque(maxlen=self.max_candles_per_symbol)
+        for candle in ordered[-self.max_candles_per_symbol :]:
+            history.append(candle)
+        self._history[symbol] = history
+        self._current.pop(symbol, None)

@@ -81,3 +81,123 @@ Safety constraints:
 - No WS protocol rewrite; add only new event types.
 - No new backend endpoint.
 - Keep mock mode as default local validation path.
+
+## 7) Phase 7 Minimum-Change Plan (Candle Persistence & Backfill)
+Scope reference: `doc/superswinghelper_roadmap_checklist.md` Phase 7
+
+What will be persisted:
+- Closed 1-minute candles only (not in-progress updates)
+- Fields: `symbol`, `timeframe`, `timestamp`, `open`, `high`, `low`, `close`, `volume`
+
+Where and when to write:
+- Add SQLAlchemy model/table for candle history
+- Runtime writes on candle close path (`add_tick` rollover result)
+- Persist before/around existing candle close handling, without changing signal logic
+
+Duplicate prevention:
+- DB unique key on `(symbol, timeframe, timestamp)`
+- Runtime write path uses duplicate-safe upsert-like logic (select then update/insert)
+
+How chart API history will be assembled:
+- Query persisted closed candles from DB by `symbol` + `timeframe` with `limit`
+- Keep ascending order for response
+- Merge current in-memory candle (if exists) from aggregator
+- Deduplicate by timestamp and keep stable sorted output
+- Compute overlays on merged final candle list
+- Keep response contract unchanged: `candles`, `overlays`, `markers`
+
+Range/limit behavior:
+- Keep current limit-based API behavior for this phase (no complex range selector)
+- Improve effective backfill depth by reading DB history instead of memory-only list
+
+Recovery goal:
+- After backend restart, previously persisted closed candles still appear via chart API
+- Mock mode remains the primary local verification path
+
+## 8) UI Polish Minimum-Change Plan (Post-Phase 7)
+Scope references:
+- `doc/kospi_swing_signal_spec_beginner_side_hustle.md`
+- `doc/superswinghelper_roadmap_checklist.md`
+
+Goal of this step:
+- Keep current chart tab behavior and data flow
+- Improve information hierarchy and trading-app-like polish
+- Avoid backend/strategy changes
+
+Minimum-change implementation points:
+1. Instrument header bar (compact)
+- Replace large summary style in chart tab with a dense instrument header:
+  - symbol/company
+  - current price / change%
+  - latest signal badge
+  - last update timestamp
+- Keep wording beginner-friendly and non-auto-trading.
+
+2. Compact toolbar controls
+- Refactor chart controls from form-like layout into a compact toolbar:
+  - symbol selector
+  - RSI / marker segmented toggles
+  - refresh + loading status
+
+3. Chart prominence and cleaner panels
+- Make price chart the visual center with larger, cleaner card treatment.
+- Keep volume and optional RSI in separate lightweight panels below.
+- Keep signal explanations outside the candlestick plot area.
+
+4. Reduce chart noise
+- Use shorter marker text on chart (minimal labels/icons)
+- Keep full signal reason in a separate “최근 신호 설명” panel
+- So price action remains readable even with markers enabled.
+
+5. Consistent visual system (frontend-only)
+- Unify neutral background, panel border, subtle shadow, spacing rhythm
+- Keep existing tab navigation and app-level behavior unchanged
+
+Files to touch (expected):
+- `apps/web/components/chart/ChartSection.tsx`
+- `apps/web/components/chart/ChartControls.tsx`
+- `apps/web/components/chart/CandlestickChart.tsx`
+- `apps/web/components/chart/VolumeChart.tsx`
+- `apps/web/app/globals.css`
+- `README.md` (short note for UI polish)
+
+## 9) Phase 8 Minimum-Change Plan (Real KIS Provider Integration)
+Scope reference: `doc/superswinghelper_roadmap_checklist.md` Phase 8
+
+Goal:
+- Keep existing runtime/chart/signal pipeline
+- Swap market data source between `mock` and `kis` by config
+- Add real KIS auth + quote polling + intraday history fetch
+
+Integration points:
+1. Provider contract extension
+- Extend `MarketDataProvider` with a history method for chart/bootstrap:
+  - `get_recent_candles(symbol, limit)`
+- Keep `get_ticks(symbols)` as the live ingestion interface.
+
+2. KIS adapter implementation (minimal reliable path)
+- Implement OAuth token acquisition/refresh (`/oauth2/tokenP`)
+- Implement real quote retrieval for live polling (`/uapi/.../inquire-price`)
+- Implement intraday candle retrieval for initial history (`/uapi/.../inquire-time-itemchartprice`)
+- Parse response defensively because KIS field names can vary by environment.
+
+3. Runtime bootstrap for chart history
+- Before normal tick loop, for newly watched symbols:
+  - try provider history fetch
+  - upsert candles into `candles_1m`
+  - seed aggregator closed-candle history
+- This keeps:
+  - chart REST initial load quality
+  - signal engine warm-up quality
+  - existing websocket flow unchanged
+
+4. Keep mock mode intact
+- `MockMarketDataProvider` keeps existing behavior and returns empty history bootstrap.
+- Provider selection remains `MARKET_DATA_PROVIDER=mock|kis`.
+
+5. Config and docs
+- Add KIS-focused env vars (base URL, poll interval, TR IDs, history seed limit).
+- Document:
+  - required keys
+  - mock vs kis switching
+  - limitations (polling-based live for MVP, no order execution)

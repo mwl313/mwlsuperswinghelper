@@ -34,6 +34,12 @@ const markerColorMap: Record<SignalType, string> = {
   sell_warning: "#a4302d",
 };
 
+const markerShortLabelMap: Record<SignalType, string> = {
+  buy_candidate: "매수",
+  breakout: "돌파",
+  sell_warning: "경고",
+};
+
 function toUtcTime(timestamp: string): UTCTimestamp {
   return Math.floor(new Date(timestamp).getTime() / 1000) as UTCTimestamp;
 }
@@ -46,6 +52,21 @@ function toMs(timestamp: string): number {
 function numberFormat(value: number | null | undefined, digits = 2): string {
   if (value === null || value === undefined) return "-";
   return value.toLocaleString("ko-KR", { maximumFractionDigits: digits });
+}
+
+function formatKstDateTime(timestamp: string | null | undefined): string {
+  if (!timestamp) return "-";
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return "-";
+  return new Intl.DateTimeFormat("ko-KR", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    timeZone: "Asia/Seoul",
+  }).format(date);
 }
 
 function round(value: number): number {
@@ -155,6 +176,7 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
   const [chartData, setChartData] = useState<ChartResponse | null>(null);
   const [showRsi, setShowRsi] = useState(false);
   const [showMarkers, setShowMarkers] = useState(true);
+  const [wsConnected, setWsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -183,8 +205,24 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
   }, [selectedSymbol, loadChart]);
 
   useEffect(() => {
-    if (!selectedSymbol) return;
+    if (!selectedSymbol) {
+      setWsConnected(false);
+      return;
+    }
+
     const ws = new WebSocket(WS_URL);
+
+    ws.onopen = () => {
+      setWsConnected(true);
+    };
+
+    ws.onclose = () => {
+      setWsConnected(false);
+    };
+
+    ws.onerror = () => {
+      setWsConnected(false);
+    };
 
     ws.onmessage = (event) => {
       try {
@@ -203,11 +241,12 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
           };
         });
       } catch {
-        // ignore malformed payload
+        // ignore malformed ws payload
       }
     };
 
     return () => {
+      setWsConnected(false);
       ws.close();
     };
   }, [selectedSymbol]);
@@ -253,10 +292,20 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
       position: row.type === "sell_warning" ? "aboveBar" : "belowBar",
       color: markerColorMap[row.type],
       shape: row.type === "sell_warning" ? "arrowDown" : row.type === "breakout" ? "circle" : "arrowUp",
-      text: row.title,
+      text: markerShortLabelMap[row.type],
     }));
 
     return { candles, ma20, ma60, bbUpper, bbMid, bbLower, volume, rsi14, markers };
+  }, [chartData]);
+
+  const latestCandleTimestamp = useMemo(() => {
+    if (!chartData || chartData.candles.length === 0) return null;
+    return chartData.candles[chartData.candles.length - 1].timestamp;
+  }, [chartData]);
+
+  const recentMarkerRows = useMemo(() => {
+    if (!chartData) return [];
+    return [...chartData.markers].sort((a, b) => toMs(b.timestamp) - toMs(a.timestamp)).slice(0, 4);
   }, [chartData]);
 
   if (!selectedSymbol || symbols.length === 0) {
@@ -269,37 +318,43 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
   }
 
   return (
-    <section className="card p-4 md:p-5">
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-bold">차트</h2>
-          <p className="text-sm text-[#496466]">초기 로드는 REST, 이후 갱신은 WebSocket으로 반영됩니다.</p>
+    <section className="space-y-4">
+      <div className="card overflow-hidden p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#6a8094]">Instrument</p>
+            <h2 className="text-lg font-bold text-[#183244]">
+              {liveQuote?.symbol_name ?? selectedMeta?.symbol_name ?? selectedSymbol}
+              <span className="ml-2 text-sm font-medium text-[#6a8094]">{selectedSymbol}</span>
+            </h2>
+          </div>
+          <div className="text-right">
+            <p className="text-[11px] text-[#6a8094]">마지막 반영</p>
+            <p className="text-xs font-semibold text-[#264256]">{formatKstDateTime(latestCandleTimestamp)}</p>
+          </div>
         </div>
-        <p className="text-xs text-[#7a6a51]">실시간 이벤트: candle_update / candle_closed</p>
-      </div>
 
-      <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-xl border border-[#d8c9ae] bg-white p-3">
-          <p className="text-xs text-[#7a6a51]">종목</p>
-          <p className="mt-1 font-semibold">
-            {liveQuote?.symbol_name ?? selectedMeta?.symbol_name ?? selectedSymbol} ({selectedSymbol})
-          </p>
-        </div>
-        <div className="rounded-xl border border-[#d8c9ae] bg-white p-3">
-          <p className="text-xs text-[#7a6a51]">현재가</p>
-          <p className="mt-1 font-semibold">{numberFormat(liveQuote?.price, 2)}</p>
-        </div>
-        <div className="rounded-xl border border-[#d8c9ae] bg-white p-3">
-          <p className="text-xs text-[#7a6a51]">변동률</p>
-          <p className={`mt-1 font-semibold ${(liveQuote?.change_percent ?? 0) < 0 ? "text-[#a4302d]" : "text-[#1f7a59]"}`}>
-            {liveQuote?.change_percent !== null && liveQuote?.change_percent !== undefined ? `${liveQuote.change_percent.toFixed(2)}%` : "-"}
-          </p>
-        </div>
-        <div className="rounded-xl border border-[#d8c9ae] bg-white p-3">
-          <p className="text-xs text-[#7a6a51]">최근 시그널</p>
-          <p className="mt-1 font-semibold">
-            {recentSignal ? `${signalTypeText[recentSignal.signal_type]} (${recentSignal.signal_strength})` : "최근 신호 없음"}
-          </p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-3 lg:grid-cols-4">
+          <div className="rounded-lg border border-[#d7e0e8] bg-[#f9fbff] px-3 py-2">
+            <p className="text-[11px] text-[#6a8094]">현재가</p>
+            <p className="mt-0.5 text-xl font-bold text-[#193243]">{numberFormat(liveQuote?.price, 2)}</p>
+          </div>
+          <div className="rounded-lg border border-[#d7e0e8] bg-[#f9fbff] px-3 py-2">
+            <p className="text-[11px] text-[#6a8094]">변동률</p>
+            <p className={`mt-1 text-base font-semibold ${(liveQuote?.change_percent ?? 0) < 0 ? "text-[#b42318]" : "text-[#027a48]"}`}>
+              {liveQuote?.change_percent !== null && liveQuote?.change_percent !== undefined ? `${liveQuote.change_percent.toFixed(2)}%` : "-"}
+            </p>
+          </div>
+          <div className="rounded-lg border border-[#d7e0e8] bg-[#f9fbff] px-3 py-2">
+            <p className="text-[11px] text-[#6a8094]">최근 시그널</p>
+            <p className="mt-1 text-sm font-semibold text-[#1b3447]">
+              {recentSignal ? `${signalTypeText[recentSignal.signal_type]} (${recentSignal.signal_strength})` : "최근 신호 없음"}
+            </p>
+          </div>
+          <div className="rounded-lg border border-[#d7e0e8] bg-[#f9fbff] px-3 py-2">
+            <p className="text-[11px] text-[#6a8094]">실시간 상태</p>
+            <p className={`mt-1 text-sm font-semibold ${wsConnected ? "text-[#027a48]" : "text-[#b42318]"}`}>{wsConnected ? "연결됨" : "재연결 중"}</p>
+          </div>
         </div>
       </div>
 
@@ -319,22 +374,58 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
 
       {error ? <p className="mb-3 text-sm text-[#a4302d]">오류: {error}</p> : null}
 
-      <div className="space-y-3">
-        <CandlestickChart
-          candles={chartSeries.candles}
-          ma20={chartSeries.ma20}
-          ma60={chartSeries.ma60}
-          bollingerUpper={chartSeries.bbUpper}
-          bollingerMid={chartSeries.bbMid}
-          bollingerLower={chartSeries.bbLower}
-          markers={chartSeries.markers}
-          showMarkers={showMarkers}
-        />
-        <VolumeChart volumeData={chartSeries.volume} rsiData={chartSeries.rsi14} showRsi={showRsi} />
+      <div className="card p-3 md:p-4">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm font-semibold text-[#243d51]">가격 차트 (1분봉)</p>
+          <div className="flex flex-wrap items-center gap-2 text-[11px] text-[#61768a]">
+            <span className="rounded-full border border-[#d7e0e8] bg-white px-2 py-0.5">MA20</span>
+            <span className="rounded-full border border-[#d7e0e8] bg-white px-2 py-0.5">MA60</span>
+            <span className="rounded-full border border-[#d7e0e8] bg-white px-2 py-0.5">Bollinger</span>
+            <span className="rounded-full border border-[#d7e0e8] bg-white px-2 py-0.5">Signal</span>
+          </div>
+        </div>
+        <div className="rounded-xl border border-[#d7e0e8] bg-white p-2">
+          <CandlestickChart
+            candles={chartSeries.candles}
+            ma20={chartSeries.ma20}
+            ma60={chartSeries.ma60}
+            bollingerUpper={chartSeries.bbUpper}
+            bollingerMid={chartSeries.bbMid}
+            bollingerLower={chartSeries.bbLower}
+            markers={chartSeries.markers}
+            showMarkers={showMarkers}
+          />
+        </div>
+      </div>
+
+      <div className="grid gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+        <div className="card p-3 md:p-4">
+          <VolumeChart volumeData={chartSeries.volume} rsiData={chartSeries.rsi14} showRsi={showRsi} />
+        </div>
+
+        <aside className="card p-3 md:p-4">
+          <h3 className="text-sm font-semibold text-[#243d51]">최근 시그널 설명</h3>
+          <p className="mt-1 text-xs text-[#5f7387]">차트 위 마커는 간단 표시만 하고, 상세 이유는 여기에서 확인합니다.</p>
+          <div className="mt-3 space-y-2">
+            {recentMarkerRows.length === 0 ? (
+              <p className="rounded-lg border border-[#d7e0e8] bg-[#f9fbff] px-3 py-2 text-xs text-[#5f7387]">최근 신호가 없습니다.</p>
+            ) : (
+              recentMarkerRows.map((marker) => (
+                <div key={`${marker.timestamp}-${marker.type}`} className="rounded-lg border border-[#d7e0e8] bg-[#f9fbff] px-3 py-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-semibold text-[#203b4d]">{marker.title}</p>
+                    <p className="text-[11px] text-[#6a8094]">{formatKstDateTime(marker.timestamp)}</p>
+                  </div>
+                  <p className="mt-1 text-xs text-[#4e6376]">{marker.description}</p>
+                </div>
+              ))
+            )}
+          </div>
+        </aside>
       </div>
 
       {chartSeries.candles.length === 0 ? (
-        <p className="mt-3 text-xs text-[#7a6a51]">아직 캔들 데이터가 충분하지 않습니다. 잠시 후 실시간 이벤트로 갱신됩니다.</p>
+        <p className="mt-3 text-xs text-[#5f7387]">아직 캔들 데이터가 충분하지 않습니다. 잠시 후 실시간 이벤트로 갱신됩니다.</p>
       ) : null}
     </section>
   );

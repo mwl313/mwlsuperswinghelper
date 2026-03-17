@@ -24,12 +24,14 @@ export function VolumeChart({ volumeData, rsiData, showRsi }: VolumeChartProps) 
   const volumeContainerRef = useRef<HTMLDivElement | null>(null);
   const volumeChartRef = useRef<IChartApi | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram", Time> | null>(null);
+  const volumeFittedRef = useRef(false);
 
   const rsiContainerRef = useRef<HTMLDivElement | null>(null);
   const rsiChartRef = useRef<IChartApi | null>(null);
   const rsiSeriesRef = useRef<ISeriesApi<"Line", Time> | null>(null);
   const overboughtSeriesRef = useRef<ISeriesApi<"Line", Time> | null>(null);
   const oversoldSeriesRef = useRef<ISeriesApi<"Line", Time> | null>(null);
+  const rsiFittedRef = useRef(false);
 
   const rsiGuideData = useMemo(() => {
     return rsiData.map((row) => ({ time: row.time, value: 70 }));
@@ -44,20 +46,20 @@ export function VolumeChart({ volumeData, rsiData, showRsi }: VolumeChartProps) 
 
     const chart = createChart(container, {
       width: container.clientWidth,
-      height: 170,
+      height: 160,
       layout: {
-        background: { type: ColorType.Solid, color: "#fffdf7" },
-        textColor: "#274a4d",
+        background: { type: ColorType.Solid, color: "#ffffff" },
+        textColor: "#516579",
       },
       grid: {
-        vertLines: { color: "#efe4d1" },
-        horzLines: { color: "#efe4d1" },
+        vertLines: { color: "#f1f5f9" },
+        horzLines: { color: "#f1f5f9" },
       },
       rightPriceScale: {
-        borderColor: "#d8c9ae",
+        borderColor: "#e2e8f0",
       },
       timeScale: {
-        borderColor: "#d8c9ae",
+        borderColor: "#e2e8f0",
         timeVisible: true,
         secondsVisible: false,
       },
@@ -83,14 +85,16 @@ export function VolumeChart({ volumeData, rsiData, showRsi }: VolumeChartProps) 
       observer.disconnect();
       volumeSeriesRef.current = null;
       volumeChartRef.current = null;
+      volumeFittedRef.current = false;
       chart.remove();
     };
   }, []);
 
   useEffect(() => {
     volumeSeriesRef.current?.setData(volumeData);
-    if (volumeData.length > 0) {
+    if (volumeData.length > 0 && !volumeFittedRef.current) {
       volumeChartRef.current?.timeScale().fitContent();
+      volumeFittedRef.current = true;
     }
   }, [volumeData]);
 
@@ -111,21 +115,21 @@ export function VolumeChart({ volumeData, rsiData, showRsi }: VolumeChartProps) 
 
     const chart = createChart(container, {
       width: container.clientWidth,
-      height: 160,
+      height: 150,
       layout: {
-        background: { type: ColorType.Solid, color: "#fffdf7" },
-        textColor: "#274a4d",
+        background: { type: ColorType.Solid, color: "#ffffff" },
+        textColor: "#516579",
       },
       grid: {
-        vertLines: { color: "#efe4d1" },
-        horzLines: { color: "#efe4d1" },
+        vertLines: { color: "#f1f5f9" },
+        horzLines: { color: "#f1f5f9" },
       },
       rightPriceScale: {
-        borderColor: "#d8c9ae",
+        borderColor: "#e2e8f0",
         scaleMargins: { top: 0.1, bottom: 0.1 },
       },
       timeScale: {
-        borderColor: "#d8c9ae",
+        borderColor: "#e2e8f0",
         timeVisible: true,
         secondsVisible: false,
       },
@@ -166,6 +170,7 @@ export function VolumeChart({ volumeData, rsiData, showRsi }: VolumeChartProps) 
       rsiSeriesRef.current = null;
       overboughtSeriesRef.current = null;
       oversoldSeriesRef.current = null;
+      rsiFittedRef.current = false;
     };
   }, [showRsi]);
 
@@ -174,21 +179,24 @@ export function VolumeChart({ volumeData, rsiData, showRsi }: VolumeChartProps) 
     rsiSeriesRef.current?.setData(rsiData);
     overboughtSeriesRef.current?.setData(rsiGuideData);
     oversoldSeriesRef.current?.setData(rsiGuideLowData);
-    if (rsiData.length > 0) {
+    if (rsiData.length > 0 && !rsiFittedRef.current) {
       rsiChartRef.current?.timeScale().fitContent();
+      rsiFittedRef.current = true;
     }
   }, [showRsi, rsiData, rsiGuideData, rsiGuideLowData]);
 
   return (
     <div className="space-y-3">
-      <div className="h-[170px] w-full rounded-xl border border-[#d8c9ae] bg-white" ref={volumeContainerRef} />
+      <div>
+        <p className="mb-1 text-[11px] font-semibold text-[#5b6f82]">거래량</p>
+        <div className="h-[160px] w-full" ref={volumeContainerRef} />
+      </div>
       {showRsi ? (
         <div>
-          <p className="mb-2 text-xs text-[#7a6a51]">RSI(14)</p>
-          <div className="h-[160px] w-full rounded-xl border border-[#d8c9ae] bg-white" ref={rsiContainerRef} />
+          <p className="mb-1 text-[11px] font-semibold text-[#5b6f82]">RSI(14)</p>
+          <div className="h-[150px] w-full" ref={rsiContainerRef} />
         </div>
       ) : null}
     </div>
   );
 }
-

@@ -230,11 +230,30 @@ PostgreSQL로 교체하려면 `.env`에서 `DATABASE_URL`만 변경하면 됩니
 
 현재:
 - `app/services/market_data/mock_provider.py`
+- `app/services/market_data/kis_adapter.py` (실데이터 연동)
 
 실제 증권사 연동 확장 포인트:
 - `app/services/market_data/base.py` (`MarketDataProvider` 인터페이스)
-- `app/services/market_data/kis_adapter.py` (KIS 어댑터 스텁)
+- `app/services/market_data/kis_adapter.py` (KIS 인증/시세/분봉 연동)
 - `app/workers/runtime.py`의 `_build_provider()`에서 선택
+
+KIS 모드 실행:
+1. `.env`(또는 `services/api/.env`)에 아래 값 설정
+   - `MARKET_DATA_PROVIDER=kis`
+   - `KIS_APP_KEY=...`
+   - `KIS_APP_SECRET=...`
+2. 필요 시 환경별 값 조정
+   - `KIS_BASE_URL` (기본: 실서버)
+   - `KIS_POLL_INTERVAL_SECONDS`
+   - `KIS_HISTORY_SEED_LIMIT`
+   - `KIS_QUOTE_TR_ID`
+   - `KIS_INTRADAY_TR_ID`
+
+KIS 모드 동작 방식(MVP):
+- 초기 히스토리: KIS 분봉 조회(`inquire-time-itemchartprice`) -> DB(`candles_1m`) 저장 -> 런타임 시드
+- 실시간: KIS 시세 조회(`inquire-price`) 폴링 -> 기존 캔들 집계/시그널 엔진 재사용
+- 주문/계좌/자동매매는 포함하지 않음
+- `MARKET_DATA_PROVIDER=mock`로 언제든 로컬 mock 모드 유지 가능
 
 ## 7. 초보자 보호 UX 반영
 

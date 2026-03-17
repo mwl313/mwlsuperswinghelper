@@ -28,12 +28,17 @@ export function ChartControls({
   onToggleMarkers,
   onRefresh,
 }: ChartControlsProps) {
+  const toggleBase =
+    "rounded-md border px-3 py-1.5 text-xs font-semibold transition";
+  const toggleOn = "border-[#0f6c5f] bg-[#e5f5f2] text-[#0f6c5f]";
+  const toggleOff = "border-[#d3dbe3] bg-white text-[#4b5f73] hover:border-[#9ab0c3]";
+
   return (
-    <div className="mb-4 grid gap-3 rounded-xl border border-[#d8c9ae] bg-white p-3 md:grid-cols-[1fr_auto_auto_auto]">
-      <label className="text-sm">
-        감시 종목
+    <div className="mb-4 flex flex-wrap items-end gap-2 rounded-xl border border-[#d7e0e8] bg-white px-3 py-2">
+      <label className="min-w-[220px] flex-1 text-xs font-semibold text-[#5b6f82]">
+        종목 선택
         <select
-          className="mt-1 w-full rounded-md border border-[#c9b89c] bg-white px-2 py-1"
+          className="mt-1 w-full rounded-md border border-[#d3dbe3] bg-[#f8fbff] px-2.5 py-1.5 text-sm text-[#1a2e3b]"
           value={selectedSymbol}
           onChange={(event) => onSelectSymbol(event.target.value)}
         >
@@ -45,25 +50,33 @@ export function ChartControls({
         </select>
       </label>
 
-      <label className="flex items-center gap-2 self-end pb-1 text-sm">
-        <input type="checkbox" checked={showRsi} onChange={(event) => onToggleRsi(event.target.checked)} />
-        RSI 표시
-      </label>
-
-      <label className="flex items-center gap-2 self-end pb-1 text-sm">
-        <input type="checkbox" checked={showMarkers} onChange={(event) => onToggleMarkers(event.target.checked)} />
-        시그널 마커
-      </label>
+      <div className="flex items-center gap-1 rounded-md border border-[#d3dbe3] bg-[#f8fbff] p-1">
+        <button
+          className={`${toggleBase} ${showRsi ? toggleOn : toggleOff}`}
+          type="button"
+          onClick={() => onToggleRsi(!showRsi)}
+          aria-pressed={showRsi}
+        >
+          RSI
+        </button>
+        <button
+          className={`${toggleBase} ${showMarkers ? toggleOn : toggleOff}`}
+          type="button"
+          onClick={() => onToggleMarkers(!showMarkers)}
+          aria-pressed={showMarkers}
+        >
+          시그널
+        </button>
+      </div>
 
       <button
-        className="self-end rounded-md border border-[#c9b89c] px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+        className="rounded-md border border-[#d3dbe3] bg-white px-3 py-2 text-xs font-semibold text-[#324b5f] disabled:cursor-not-allowed disabled:opacity-60"
         type="button"
         disabled={isLoading}
         onClick={onRefresh}
       >
-        {isLoading ? "불러오는 중..." : "새로고침"}
+        {isLoading ? "갱신 중..." : "새로고침"}
       </button>
     </div>
   );
 }
-

@@ -21,8 +21,8 @@ export function AppTabs({ tabs, activeTab, onChange }: AppTabsProps) {
             key={tab.key}
             className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
               isActive
-                ? "border-[#113c3a] bg-[#113c3a] text-white"
-                : "border-[#c9b89c] bg-[#fffaf0] text-[#234244] hover:border-[#9f8a67]"
+                ? "border-[#1f4e79] bg-[#1f4e79] text-white"
+                : "border-[#d0dae3] bg-white text-[#2a465c] hover:border-[#93aac0]"
             }`}
             onClick={() => onChange(tab.key)}
           >

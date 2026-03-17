@@ -3,15 +3,15 @@
 @tailwind utilities;
 
 :root {
-  --bg-a: #f8f2e6;
-  --bg-b: #e7d5b8;
-  --surface: #fffaf0;
-  --ink: #183335;
-  --line: #c9b89c;
-  --accent: #d94f30;
-  --ok: #1f7a59;
-  --warn: #bc5f07;
-  --risk: #a4302d;
+  --bg-a: #f4f7fb;
+  --bg-b: #eaf0f7;
+  --surface: #ffffff;
+  --ink: #183244;
+  --line: #d7e0e8;
+  --accent: #2d6cdf;
+  --ok: #027a48;
+  --warn: #b54708;
+  --risk: #b42318;
 }
 
 * {
@@ -21,10 +21,7 @@
 body {
   margin: 0;
   color: var(--ink);
-  background:
-    radial-gradient(circle at 15% 20%, rgba(255, 255, 255, 0.5), transparent 35%),
-    radial-gradient(circle at 80% 10%, rgba(217, 79, 48, 0.12), transparent 35%),
-    linear-gradient(135deg, var(--bg-a), var(--bg-b));
+  background: linear-gradient(180deg, var(--bg-a), var(--bg-b));
   min-height: 100vh;
   font-family: 'Nanum Gothic', 'Apple SD Gothic Neo', sans-serif;
 }
@@ -33,7 +30,7 @@ body {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 16px;
-  box-shadow: 0 12px 32px rgba(17, 60, 58, 0.12);
+  box-shadow: 0 8px 20px rgba(15, 45, 74, 0.06);
 }
 
 .signal-strong {

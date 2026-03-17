@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections import deque
 from datetime import datetime, timedelta, timezone
 
@@ -6,16 +7,19 @@ from sqlalchemy import desc, select
 
 from app.core.config import get_settings
 from app.db.session import SessionLocal
+from app.models.candle_history import CandleHistory
 from app.models.signal_log import SignalLog
 from app.models.strategy_settings import StrategySettings
 from app.models.watchlist import WatchlistItem
 from app.services.candles import Candle, CandleAggregator
-from app.services.market_data.base import MarketDataProvider
+from app.services.market_data.base import MarketCandle, MarketDataProvider
 from app.services.market_data.kis_adapter import KoreaInvestmentAdapter
 from app.services.market_data.mock_provider import MockMarketDataProvider
 from app.services.notifications.telegram import send_telegram_message
 from app.services.signals.engine import SignalDecision, evaluate_signals
 from app.services.ws_manager import WSManager
+
+logger = logging.getLogger(__name__)
 
 
 class MarketRuntime:
@@ -33,6 +37,7 @@ class MarketRuntime:
         self.last_signal_times: dict[tuple[str, str], datetime] = {}
         self.latest_quotes: dict[str, dict] = {}
         self.recent_signals: deque[dict] = deque(maxlen=200)
+        self.history_seeded_symbols: set[str] = set()
 
     @staticmethod
     def _candle_event_payload(event_type: str, symbol: str, candle: Candle) -> dict:
@@ -55,6 +60,12 @@ class MarketRuntime:
             return KoreaInvestmentAdapter(
                 app_key=self.settings.kis_app_key,
                 app_secret=self.settings.kis_app_secret,
+                base_url=self.settings.kis_base_url,
+                poll_interval_seconds=self.settings.kis_poll_interval_seconds,
+                request_timeout_seconds=self.settings.kis_request_timeout_seconds,
+                market_div_code=self.settings.kis_market_div_code,
+                quote_tr_id=self.settings.kis_quote_tr_id,
+                intraday_tr_id=self.settings.kis_intraday_tr_id,
             )
         return MockMarketDataProvider(
             interval_seconds=self.settings.mock_tick_interval_seconds,
@@ -123,6 +134,99 @@ class MarketRuntime:
         self.last_signal_times[key] = decision.timestamp
         return False
 
+    def _upsert_closed_candle(self, candle: Candle) -> None:
+        with SessionLocal() as db:
+            existing = db.scalar(
+                select(CandleHistory).where(
+                    CandleHistory.symbol == candle.symbol,
+                    CandleHistory.timeframe == "1m",
+                    CandleHistory.timestamp == candle.timestamp,
+                )
+            )
+            if existing is None:
+                db.add(
+                    CandleHistory(
+                        symbol=candle.symbol,
+                        timeframe="1m",
+                        timestamp=candle.timestamp,
+                        open=candle.open,
+                        high=candle.high,
+                        low=candle.low,
+                        close=candle.close,
+                        volume=candle.volume,
+                    )
+                )
+            else:
+                existing.open = candle.open
+                existing.high = candle.high
+                existing.low = candle.low
+                existing.close = candle.close
+                existing.volume = candle.volume
+            db.commit()
+
+    def _load_recent_closed_candles(self, symbol: str, limit: int) -> list[Candle]:
+        with SessionLocal() as db:
+            rows = list(
+                db.scalars(
+                    select(CandleHistory)
+                    .where(CandleHistory.symbol == symbol, CandleHistory.timeframe == "1m")
+                    .order_by(desc(CandleHistory.timestamp))
+                    .limit(limit)
+                ).all()
+            )
+        rows.reverse()
+        return [
+            Candle(
+                symbol=row.symbol,
+                timestamp=row.timestamp if row.timestamp.tzinfo else row.timestamp.replace(tzinfo=timezone.utc),
+                open=row.open,
+                high=row.high,
+                low=row.low,
+                close=row.close,
+                volume=row.volume,
+            )
+            for row in rows
+        ]
+
+    async def _seed_symbol_history(self, symbol: str) -> None:
+        # 1) Reuse persisted history first.
+        persisted = self._load_recent_closed_candles(symbol=symbol, limit=self.settings.kis_history_seed_limit)
+        if len(persisted) >= min(self.settings.kis_history_seed_limit, 60):
+            self.aggregator.seed_closed_candles(symbol=symbol, candles=persisted)
+            self.history_seeded_symbols.add(symbol)
+            return
+
+        # 2) Fetch provider history (KIS real data in kis mode).
+        fetched_rows: list[MarketCandle] = []
+        try:
+            fetched_rows = await self.provider.get_recent_candles(symbol=symbol, limit=self.settings.kis_history_seed_limit)
+        except Exception as exc:
+            logger.warning("history seed fetch failed for %s: %s", symbol, exc)
+            fetched_rows = []
+
+        for row in fetched_rows:
+            self._upsert_closed_candle(
+                Candle(
+                    symbol=row.symbol,
+                    timestamp=row.timestamp,
+                    open=row.open,
+                    high=row.high,
+                    low=row.low,
+                    close=row.close,
+                    volume=row.volume,
+                )
+            )
+
+        merged = self._load_recent_closed_candles(symbol=symbol, limit=self.settings.kis_history_seed_limit)
+        if merged:
+            self.aggregator.seed_closed_candles(symbol=symbol, candles=merged)
+        self.history_seeded_symbols.add(symbol)
+
+    async def _ensure_seeded_histories(self, symbols: list[str]) -> None:
+        missing = [symbol for symbol in symbols if symbol not in self.history_seeded_symbols]
+        for symbol in missing:
+            await self._seed_symbol_history(symbol)
+
     async def _handle_closed_candle(
         self,
         symbol: str,
@@ -168,6 +272,7 @@ class MarketRuntime:
 
             symbol_to_name = {item.symbol: item.symbol_name for item in items}
             symbols = list(symbol_to_name.keys())
+            await self._ensure_seeded_histories(symbols)
             ticks = await self.provider.get_ticks(symbols)
             strategy_settings = self._get_settings()
             if strategy_settings is None:
@@ -197,6 +302,7 @@ class MarketRuntime:
                 if closed is None:
                     continue
 
+                self._upsert_closed_candle(closed)
                 await self.ws_manager.broadcast(self._candle_event_payload("candle_closed", tick.symbol, closed))
                 candles = self.aggregator.get_recent_candles(tick.symbol, include_current=False)
                 await self._handle_closed_candle(

@@ -39,6 +39,7 @@ export function CandlestickChart({
 }: CandlestickChartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
+  const lastCandleCountRef = useRef(0);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick", Time> | null>(null);
   const ma20SeriesRef = useRef<ISeriesApi<"Line", Time> | null>(null);
   const ma60SeriesRef = useRef<ISeriesApi<"Line", Time> | null>(null);
@@ -53,26 +54,26 @@ export function CandlestickChart({
 
     const chart = createChart(container, {
       width: container.clientWidth,
-      height: 420,
+      height: 500,
       layout: {
-        background: { type: ColorType.Solid, color: "#fffdf7" },
-        textColor: "#274a4d",
+        background: { type: ColorType.Solid, color: "#ffffff" },
+        textColor: "#516579",
       },
       grid: {
-        vertLines: { color: "#efe4d1" },
-        horzLines: { color: "#efe4d1" },
+        vertLines: { color: "#f1f5f9" },
+        horzLines: { color: "#f1f5f9" },
       },
       rightPriceScale: {
-        borderColor: "#d8c9ae",
+        borderColor: "#e2e8f0",
       },
       timeScale: {
-        borderColor: "#d8c9ae",
+        borderColor: "#e2e8f0",
         timeVisible: true,
         secondsVisible: false,
       },
       crosshair: {
-        vertLine: { color: "#8ba7a5" },
-        horzLine: { color: "#8ba7a5" },
+        vertLine: { color: "#94a3b8" },
+        horzLine: { color: "#94a3b8" },
       },
     });
 
@@ -85,11 +86,11 @@ export function CandlestickChart({
       borderUpColor: "#1f7a59",
       borderDownColor: "#a4302d",
     });
-    const ma20Series = chart.addSeries(LineSeries, { color: "#2d6cdf", lineWidth: 2, priceLineVisible: false });
-    const ma60Series = chart.addSeries(LineSeries, { color: "#7b4cbf", lineWidth: 2, priceLineVisible: false });
-    const bbUpperSeries = chart.addSeries(LineSeries, { color: "#a0a0a0", lineWidth: 1, priceLineVisible: false });
-    const bbMidSeries = chart.addSeries(LineSeries, { color: "#8a8a8a", lineWidth: 1, priceLineVisible: false });
-    const bbLowerSeries = chart.addSeries(LineSeries, { color: "#a0a0a0", lineWidth: 1, priceLineVisible: false });
+    const ma20Series = chart.addSeries(LineSeries, { color: "#2b6de0", lineWidth: 2, priceLineVisible: false });
+    const ma60Series = chart.addSeries(LineSeries, { color: "#6b46c1", lineWidth: 2, priceLineVisible: false });
+    const bbUpperSeries = chart.addSeries(LineSeries, { color: "#94a3b8", lineWidth: 1, priceLineVisible: false });
+    const bbMidSeries = chart.addSeries(LineSeries, { color: "#64748b", lineWidth: 1, priceLineVisible: false });
+    const bbLowerSeries = chart.addSeries(LineSeries, { color: "#94a3b8", lineWidth: 1, priceLineVisible: false });
 
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
@@ -117,6 +118,7 @@ export function CandlestickChart({
       bbMidSeriesRef.current = null;
       bbLowerSeriesRef.current = null;
       chartRef.current = null;
+      lastCandleCountRef.current = 0;
       chart.remove();
     };
   }, []);
@@ -130,11 +132,11 @@ export function CandlestickChart({
     bbMidSeriesRef.current?.setData(bollingerMid);
     bbLowerSeriesRef.current?.setData(bollingerLower);
     markerPluginRef.current?.setMarkers(showMarkers ? markers : []);
-    if (candles.length > 0) {
+    if (candles.length > 0 && lastCandleCountRef.current === 0) {
       chartRef.current?.timeScale().fitContent();
     }
+    lastCandleCountRef.current = candles.length;
   }, [candles, ma20, ma60, bollingerUpper, bollingerMid, bollingerLower, markers, showMarkers]);
 
-  return <div className="h-[420px] w-full rounded-xl border border-[#d8c9ae] bg-white" ref={containerRef} />;
+  return <div className="h-[500px] w-full" ref={containerRef} />;
 }
-

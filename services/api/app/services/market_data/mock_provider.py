@@ -2,7 +2,7 @@ import asyncio
 import random
 from datetime import datetime, timedelta, timezone
 
-from app.services.market_data.base import MarketDataProvider, Tick
+from app.services.market_data.base import MarketCandle, MarketDataProvider, Tick
 
 
 class MockMarketDataProvider(MarketDataProvider):
@@ -43,3 +43,7 @@ class MockMarketDataProvider(MarketDataProvider):
             ticks.append(Tick(symbol=symbol, price=price, volume=volume, timestamp=self._virtual_market_time))
 
         return ticks
+
+    async def get_recent_candles(self, symbol: str, limit: int) -> list[MarketCandle]:
+        # Mock mode keeps startup simple; runtime builds candles from streamed ticks.
+        return []

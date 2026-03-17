@@ -1,8 +1,9 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
+from app.models.candle_history import CandleHistory
 from app.models.signal_log import SignalLog
 from app.schemas.chart import (
     ChartCandle,
@@ -20,6 +21,7 @@ _SIGNAL_TITLE_MAP = {
     "breakout": "돌파 감시",
     "sell_warning": "매도 경고",
 }
+_TIMEFRAME = "1m"
 
 
 def _overlay_points_from_sma(candles: list[Candle], period: int) -> list[ChartOverlayPoint]:
@@ -93,15 +95,66 @@ def to_chart_markers(signal_rows: list[SignalLog]) -> list[ChartMarker]:
     return markers
 
 
+def _normalize_ts(ts: datetime) -> datetime:
+    if ts.tzinfo is None:
+        return ts.replace(tzinfo=timezone.utc)
+    return ts.astimezone(timezone.utc)
+
+
+def _dedupe_sort_candles(candles: list[Candle]) -> list[Candle]:
+    indexed: dict[datetime, Candle] = {}
+    for candle in candles:
+        normalized = _normalize_ts(candle.timestamp)
+        indexed[normalized] = Candle(
+            symbol=candle.symbol,
+            timestamp=normalized,
+            open=candle.open,
+            high=candle.high,
+            low=candle.low,
+            close=candle.close,
+            volume=candle.volume,
+        )
+    return sorted(indexed.values(), key=lambda row: row.timestamp)
+
+
+def _load_persisted_closed_candles(symbol: str, limit: int, db: Session) -> list[Candle]:
+    query = (
+        select(CandleHistory)
+        .where(CandleHistory.symbol == symbol, CandleHistory.timeframe == _TIMEFRAME)
+        .order_by(desc(CandleHistory.timestamp))
+        .limit(limit)
+    )
+    rows = list(db.scalars(query).all())
+    rows.reverse()
+    return [
+        Candle(
+            symbol=row.symbol,
+            timestamp=_normalize_ts(row.timestamp),
+            open=row.open,
+            high=row.high,
+            low=row.low,
+            close=row.close,
+            volume=row.volume,
+        )
+        for row in rows
+    ]
+
+
 def get_chart_response(
     symbol: str,
     limit: int,
     runtime: MarketRuntime,
     db: Session,
 ) -> ChartResponse:
-    candles = runtime.aggregator.get_recent_candles(symbol=symbol, include_current=True)
-    if limit < len(candles):
-        candles = candles[-limit:]
+    persisted = _load_persisted_closed_candles(symbol=symbol, limit=limit, db=db)
+    current = runtime.aggregator.get_current_candle(symbol=symbol)
+
+    merged_candles = persisted.copy()
+    if current is not None:
+        merged_candles.append(current)
+    merged_candles = _dedupe_sort_candles(merged_candles)
+    if len(merged_candles) > limit:
+        merged_candles = merged_candles[-limit:]
 
     candle_rows = [
         ChartCandle(
@@ -112,10 +165,10 @@ def get_chart_response(
             close=row.close,
             volume=row.volume,
         )
-        for row in candles
+        for row in merged_candles
     ]
 
-    candle_start_ts: datetime | None = candles[0].timestamp if candles else None
+    candle_start_ts: datetime | None = merged_candles[0].timestamp if merged_candles else None
     signal_query = select(SignalLog).where(SignalLog.symbol == symbol)
     if candle_start_ts is not None:
         signal_query = signal_query.where(SignalLog.created_at >= candle_start_ts)
@@ -124,8 +177,8 @@ def get_chart_response(
 
     return ChartResponse(
         symbol=symbol,
-        timeframe="1m",
+        timeframe=_TIMEFRAME,
         candles=candle_rows,
-        overlays=build_chart_overlays(candles),
+        overlays=build_chart_overlays(merged_candles),
         markers=to_chart_markers(signal_rows),
     )
