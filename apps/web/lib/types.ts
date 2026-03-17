@@ -1,5 +1,6 @@
 export type SignalType = "buy_candidate" | "breakout" | "sell_warning";
 export type SignalStrength = "weak" | "medium" | "strong";
+export type HoldingState = "not_holding" | "holding";
 
 export type DashboardSummary = {
   market_status: string;
@@ -35,6 +36,14 @@ export type LiveWatchlistItem = {
   last_signal_type: SignalType | null;
   last_signal_strength: SignalStrength | null;
   last_signal_reason: string | null;
+  holding_state: HoldingState;
+  entry_price: number | null;
+  quantity: number | null;
+  stop_loss_price: number | null;
+  take_profit_price: number | null;
+  note: string | null;
+  pnl_percent: number | null;
+  pnl_amount: number | null;
 };
 
 export type SignalLog = {
@@ -123,7 +132,7 @@ export type ChartMarker = {
 
 export type ChartResponse = {
   symbol: string;
-  timeframe: "1m";
+  timeframe: "1m" | "5m" | "15m" | "1h";
   candles: ChartCandle[];
   overlays: ChartOverlays;
   markers: ChartMarker[];
@@ -136,4 +145,31 @@ export type CandleWsEvent = {
   symbol: string;
   timeframe: "1m";
   candle: ChartCandle;
+};
+
+export type PositionSummary = {
+  symbol: string;
+  symbol_name: string;
+  holding_state: HoldingState;
+  status: "open" | "closed" | null;
+  entry_price: number | null;
+  quantity: number | null;
+  stop_loss_price: number | null;
+  take_profit_price: number | null;
+  note: string | null;
+  opened_at: string | null;
+  closed_at: string | null;
+  updated_at: string | null;
+  pnl_percent: number | null;
+  pnl_amount: number | null;
+};
+
+export type PositionUpsertPayload = {
+  holding_state: HoldingState;
+  symbol_name?: string | null;
+  entry_price?: number | null;
+  quantity?: number | null;
+  stop_loss_price?: number | null;
+  take_profit_price?: number | null;
+  note?: string | null;
 };

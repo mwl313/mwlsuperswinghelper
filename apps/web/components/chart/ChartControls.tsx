@@ -8,31 +8,22 @@ type ChartSymbolOption = {
 type ChartControlsProps = {
   symbols: ChartSymbolOption[];
   selectedSymbol: string;
-  showRsi: boolean;
-  showMarkers: boolean;
+  timeframe: "1m" | "5m" | "15m" | "1h";
   isLoading: boolean;
   onSelectSymbol: (symbol: string) => void;
-  onToggleRsi: (checked: boolean) => void;
-  onToggleMarkers: (checked: boolean) => void;
+  onTimeframeChange: (timeframe: "1m" | "5m" | "15m" | "1h") => void;
   onRefresh: () => void;
 };
 
 export function ChartControls({
   symbols,
   selectedSymbol,
-  showRsi,
-  showMarkers,
+  timeframe,
   isLoading,
   onSelectSymbol,
-  onToggleRsi,
-  onToggleMarkers,
+  onTimeframeChange,
   onRefresh,
 }: ChartControlsProps) {
-  const toggleBase =
-    "rounded-md border px-3 py-1.5 text-xs font-semibold transition";
-  const toggleOn = "border-[#0f6c5f] bg-[#e5f5f2] text-[#0f6c5f]";
-  const toggleOff = "border-[#d3dbe3] bg-white text-[#4b5f73] hover:border-[#9ab0c3]";
-
   return (
     <div className="mb-4 flex flex-wrap items-end gap-2 rounded-xl border border-[#d7e0e8] bg-white px-3 py-2">
       <label className="min-w-[220px] flex-1 text-xs font-semibold text-[#5b6f82]">
@@ -51,22 +42,21 @@ export function ChartControls({
       </label>
 
       <div className="flex items-center gap-1 rounded-md border border-[#d3dbe3] bg-[#f8fbff] p-1">
-        <button
-          className={`${toggleBase} ${showRsi ? toggleOn : toggleOff}`}
-          type="button"
-          onClick={() => onToggleRsi(!showRsi)}
-          aria-pressed={showRsi}
-        >
-          RSI
-        </button>
-        <button
-          className={`${toggleBase} ${showMarkers ? toggleOn : toggleOff}`}
-          type="button"
-          onClick={() => onToggleMarkers(!showMarkers)}
-          aria-pressed={showMarkers}
-        >
-          시그널
-        </button>
+        {(["1m", "5m", "15m", "1h"] as const).map((option) => (
+          <button
+            key={option}
+            className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition ${
+              timeframe === option
+                ? "border-[#0f6c5f] bg-[#e5f5f2] text-[#0f6c5f]"
+                : "border-[#d3dbe3] bg-white text-[#4b5f73] hover:border-[#9ab0c3]"
+            }`}
+            type="button"
+            aria-pressed={timeframe === option}
+            onClick={() => onTimeframeChange(option)}
+          >
+            {option}
+          </button>
+        ))}
       </div>
 
       <button

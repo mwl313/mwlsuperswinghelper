@@ -66,7 +66,7 @@ class ChartHistoryPersistenceTests(unittest.TestCase):
                 volume=1550.0,
             )
             runtime = _FakeRuntime(current=current)
-            response = get_chart_response(symbol="005930", limit=10, runtime=runtime, db=db)
+            response = get_chart_response(symbol="005930", limit=10, timeframe="1m", runtime=runtime, db=db)
 
         self.assertEqual(len(response.candles), 4)
         self.assertEqual(response.candles[-1].timestamp, current.timestamp)
@@ -87,11 +87,43 @@ class ChartHistoryPersistenceTests(unittest.TestCase):
                 volume=3333.0,
             )
             runtime = _FakeRuntime(current=current)
-            response = get_chart_response(symbol="005930", limit=10, runtime=runtime, db=db)
+            response = get_chart_response(symbol="005930", limit=10, timeframe="1m", runtime=runtime, db=db)
 
         self.assertEqual(len(response.candles), 3)
         self.assertEqual(response.candles[-1].timestamp, duplicate_ts)
         self.assertAlmostEqual(response.candles[-1].close, 111.5)
+
+    def test_chart_response_aggregates_5m_from_1m_source(self) -> None:
+        base = datetime(2026, 3, 16, 0, 0, tzinfo=timezone.utc)
+        with self.SessionLocal() as db:
+            for index in range(10):
+                ts = base + timedelta(minutes=index)
+                db.add(
+                    CandleHistory(
+                        symbol="005930",
+                        timeframe="1m",
+                        timestamp=ts,
+                        open=100 + index,
+                        high=101 + index,
+                        low=99 + index,
+                        close=100.5 + index,
+                        volume=1000 + index,
+                    )
+                )
+            db.commit()
+            runtime = _FakeRuntime(current=None)
+            response = get_chart_response(symbol="005930", limit=10, timeframe="5m", runtime=runtime, db=db)
+
+        self.assertEqual(response.timeframe, "5m")
+        self.assertEqual(len(response.candles), 2)
+
+        first = response.candles[0]
+        self.assertEqual(first.timestamp, base)
+        self.assertAlmostEqual(first.open, 100.0)
+        self.assertAlmostEqual(first.high, 105.0)
+        self.assertAlmostEqual(first.low, 99.0)
+        self.assertAlmostEqual(first.close, 104.5)
+        self.assertAlmostEqual(first.volume, 1000 + 1001 + 1002 + 1003 + 1004)
 
 
 if __name__ == "__main__":

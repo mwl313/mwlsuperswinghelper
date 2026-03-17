@@ -5,6 +5,7 @@ import { CandlestickData, HistogramData, LineData, SeriesMarker, Time, UTCTimest
 
 import { CandlestickChart } from "@/components/chart/CandlestickChart";
 import { ChartControls } from "@/components/chart/ChartControls";
+import { ChartLegend } from "@/components/chart/ChartLegend";
 import { VolumeChart } from "@/components/chart/VolumeChart";
 import { WS_URL, getChart } from "@/lib/api";
 import { CandleWsEvent, ChartCandle, ChartOverlayPoint, ChartOverlays, ChartResponse, LiveWatchlistItem, SignalLog, SignalType } from "@/lib/types";
@@ -20,12 +21,29 @@ type ChartSectionProps = {
   onSelectSymbol: (symbol: string) => void;
   liveQuote: LiveWatchlistItem | null;
   recentSignal: SignalLog | null;
+  onOpenPositionEditor: (symbol: string) => void;
 };
+
+type ChartTimeframe = "1m" | "5m" | "15m" | "1h";
 
 const signalTypeText: Record<SignalType, string> = {
   buy_candidate: "매수 후보",
   breakout: "돌파 감시",
   sell_warning: "매도 경고",
+};
+
+const timeframeLabel: Record<ChartTimeframe, string> = {
+  "1m": "1분봉",
+  "5m": "5분봉",
+  "15m": "15분봉",
+  "1h": "1시간봉",
+};
+
+const initialVisibleBarsByTimeframe: Record<ChartTimeframe, number> = {
+  "1m": 120,
+  "5m": 96,
+  "15m": 84,
+  "1h": 72,
 };
 
 const markerColorMap: Record<SignalType, string> = {
@@ -172,10 +190,16 @@ function mergeCandles(current: ChartCandle[], incoming: ChartCandle, eventType: 
   return current;
 }
 
-export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuote, recentSignal }: ChartSectionProps) {
+export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuote, recentSignal, onOpenPositionEditor }: ChartSectionProps) {
+  const [timeframe, setTimeframe] = useState<ChartTimeframe>("1m");
   const [chartData, setChartData] = useState<ChartResponse | null>(null);
+  const [showCandles, setShowCandles] = useState(true);
+  const [showMa20, setShowMa20] = useState(true);
+  const [showMa60, setShowMa60] = useState(true);
+  const [showBollinger, setShowBollinger] = useState(true);
   const [showRsi, setShowRsi] = useState(false);
   const [showMarkers, setShowMarkers] = useState(true);
+  const [showVolume, setShowVolume] = useState(true);
   const [wsConnected, setWsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -186,7 +210,7 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
     if (!selectedSymbol) return;
     setIsLoading(true);
     try {
-      const data = await getChart(selectedSymbol, 240);
+      const data = await getChart(selectedSymbol, 240, timeframe);
       setChartData({ ...data, overlays: recalcOverlays(data.candles) });
       setError(null);
     } catch (e) {
@@ -194,7 +218,7 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
     } finally {
       setIsLoading(false);
     }
-  }, [selectedSymbol]);
+  }, [selectedSymbol, timeframe]);
 
   useEffect(() => {
     if (!selectedSymbol) {
@@ -202,7 +226,7 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
       return;
     }
     void loadChart();
-  }, [selectedSymbol, loadChart]);
+  }, [selectedSymbol, timeframe, loadChart]);
 
   useEffect(() => {
     if (!selectedSymbol) {
@@ -230,16 +254,23 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
         if (!isCandleWsEvent(payload)) return;
         if (payload.symbol !== selectedSymbol) return;
 
-        setChartData((prev) => {
-          if (!prev || prev.symbol !== selectedSymbol) return prev;
-          const nextCandles = mergeCandles(prev.candles, payload.candle, payload.type, 240);
-          if (nextCandles === prev.candles) return prev;
-          return {
-            ...prev,
-            candles: nextCandles,
-            overlays: recalcOverlays(nextCandles),
-          };
-        });
+        if (timeframe === "1m") {
+          setChartData((prev) => {
+            if (!prev || prev.symbol !== selectedSymbol) return prev;
+            const nextCandles = mergeCandles(prev.candles, payload.candle, payload.type, 240);
+            if (nextCandles === prev.candles) return prev;
+            return {
+              ...prev,
+              candles: nextCandles,
+              overlays: recalcOverlays(nextCandles),
+            };
+          });
+          return;
+        }
+
+        if (payload.type === "candle_closed") {
+          void loadChart();
+        }
       } catch {
         // ignore malformed ws payload
       }
@@ -249,7 +280,7 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
       setWsConnected(false);
       ws.close();
     };
-  }, [selectedSymbol]);
+  }, [selectedSymbol, timeframe, loadChart]);
 
   const chartSeries = useMemo(() => {
     if (!chartData) {
@@ -304,9 +335,9 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
   }, [chartData]);
 
   const recentMarkerRows = useMemo(() => {
-    if (!chartData) return [];
+    if (!chartData || !showMarkers) return [];
     return [...chartData.markers].sort((a, b) => toMs(b.timestamp) - toMs(a.timestamp)).slice(0, 4);
-  }, [chartData]);
+  }, [chartData, showMarkers]);
 
   if (!selectedSymbol || symbols.length === 0) {
     return (
@@ -356,19 +387,57 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
             <p className={`mt-1 text-sm font-semibold ${wsConnected ? "text-[#027a48]" : "text-[#b42318]"}`}>{wsConnected ? "연결됨" : "재연결 중"}</p>
           </div>
         </div>
+
+        <div className="mt-3 rounded-lg border border-[#d7e0e8] bg-[#f9fbff] px-3 py-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs font-semibold text-[#233f53]">내 포지션 요약</p>
+            <button className="rounded-md border border-[#c4d0dc] bg-white px-2 py-1 text-xs" type="button" onClick={() => onOpenPositionEditor(selectedSymbol)}>
+              포지션 수정
+            </button>
+          </div>
+          <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[#4e6376]">
+            <span>상태: {liveQuote?.holding_state === "holding" ? "보유중" : "미보유"}</span>
+            <span>진입가: {liveQuote?.entry_price ? `${numberFormat(liveQuote.entry_price, 0)}원` : "-"}</span>
+            <span>수량: {liveQuote?.quantity ? numberFormat(liveQuote.quantity, 4) : "-"}</span>
+            <span>손절: {liveQuote?.stop_loss_price ? `${numberFormat(liveQuote.stop_loss_price, 0)}원` : "-"}</span>
+            <span>익절: {liveQuote?.take_profit_price ? `${numberFormat(liveQuote.take_profit_price, 0)}원` : "-"}</span>
+            <span className={(liveQuote?.pnl_percent ?? 0) < 0 ? "text-[#b42318]" : "text-[#027a48]"}>
+              손익률: {liveQuote?.pnl_percent !== null && liveQuote?.pnl_percent !== undefined ? `${liveQuote.pnl_percent.toFixed(2)}%` : "-"}
+            </span>
+          </div>
+        </div>
       </div>
 
       <ChartControls
         symbols={symbols}
         selectedSymbol={selectedSymbol}
-        showRsi={showRsi}
-        showMarkers={showMarkers}
+        timeframe={timeframe}
         isLoading={isLoading}
         onSelectSymbol={onSelectSymbol}
-        onToggleRsi={setShowRsi}
-        onToggleMarkers={setShowMarkers}
+        onTimeframeChange={setTimeframe}
         onRefresh={() => {
           void loadChart();
+        }}
+      />
+
+      <ChartLegend
+        toggles={{
+          candles: showCandles,
+          ma20: showMa20,
+          ma60: showMa60,
+          bollinger: showBollinger,
+          markers: showMarkers,
+          rsi: showRsi,
+          volume: showVolume,
+        }}
+        onToggle={(key, next) => {
+          if (key === "candles") setShowCandles(next);
+          if (key === "ma20") setShowMa20(next);
+          if (key === "ma60") setShowMa60(next);
+          if (key === "bollinger") setShowBollinger(next);
+          if (key === "markers") setShowMarkers(next);
+          if (key === "rsi") setShowRsi(next);
+          if (key === "volume") setShowVolume(next);
         }}
       />
 
@@ -376,13 +445,12 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
 
       <div className="card p-3 md:p-4">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <p className="text-sm font-semibold text-[#243d51]">가격 차트 (1분봉)</p>
-          <div className="flex flex-wrap items-center gap-2 text-[11px] text-[#61768a]">
-            <span className="rounded-full border border-[#d7e0e8] bg-white px-2 py-0.5">MA20</span>
-            <span className="rounded-full border border-[#d7e0e8] bg-white px-2 py-0.5">MA60</span>
-            <span className="rounded-full border border-[#d7e0e8] bg-white px-2 py-0.5">Bollinger</span>
-            <span className="rounded-full border border-[#d7e0e8] bg-white px-2 py-0.5">Signal</span>
-          </div>
+          <p className="text-sm font-semibold text-[#243d51]">가격 차트 ({timeframeLabel[timeframe]})</p>
+          <p className="text-[11px] text-[#61768a]">
+            {timeframe === "1m"
+              ? "1분봉은 실시간으로 즉시 반영됩니다."
+              : `${timeframeLabel[timeframe]}은 봉 마감 이벤트 기준으로 새로고침 반영됩니다.`}
+          </p>
         </div>
         <div className="rounded-xl border border-[#d7e0e8] bg-white p-2">
           <CandlestickChart
@@ -393,22 +461,33 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
             bollingerMid={chartSeries.bbMid}
             bollingerLower={chartSeries.bbLower}
             markers={chartSeries.markers}
+            showCandles={showCandles}
+            showMa20={showMa20}
+            showMa60={showMa60}
+            showBollinger={showBollinger}
             showMarkers={showMarkers}
+            rangeKey={`${selectedSymbol}-${timeframe}`}
+            initialVisibleBars={initialVisibleBarsByTimeframe[timeframe]}
           />
         </div>
       </div>
 
       <div className="grid gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <div className="card p-3 md:p-4">
-          <VolumeChart volumeData={chartSeries.volume} rsiData={chartSeries.rsi14} showRsi={showRsi} />
+          <VolumeChart volumeData={chartSeries.volume} rsiData={chartSeries.rsi14} showVolume={showVolume} showRsi={showRsi} />
+          {!showVolume && !showRsi ? (
+            <p className="rounded-lg border border-[#d7e0e8] bg-[#f9fbff] px-3 py-2 text-xs text-[#5f7387]">거래량/RSI가 모두 숨김 상태입니다.</p>
+          ) : null}
         </div>
 
         <aside className="card p-3 md:p-4">
           <h3 className="text-sm font-semibold text-[#243d51]">최근 시그널 설명</h3>
-          <p className="mt-1 text-xs text-[#5f7387]">차트 위 마커는 간단 표시만 하고, 상세 이유는 여기에서 확인합니다.</p>
+          <p className="mt-1 text-xs text-[#5f7387]">마커를 끄더라도 최근 신호 이유는 여기서 확인할 수 있습니다.</p>
           <div className="mt-3 space-y-2">
             {recentMarkerRows.length === 0 ? (
-              <p className="rounded-lg border border-[#d7e0e8] bg-[#f9fbff] px-3 py-2 text-xs text-[#5f7387]">최근 신호가 없습니다.</p>
+              <p className="rounded-lg border border-[#d7e0e8] bg-[#f9fbff] px-3 py-2 text-xs text-[#5f7387]">
+                {showMarkers ? "최근 신호가 없습니다." : "시그널 마커가 꺼져 있습니다."}
+              </p>
             ) : (
               recentMarkerRows.map((marker) => (
                 <div key={`${marker.timestamp}-${marker.type}`} className="rounded-lg border border-[#d7e0e8] bg-[#f9fbff] px-3 py-2">
@@ -425,8 +504,9 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
       </div>
 
       {chartSeries.candles.length === 0 ? (
-        <p className="mt-3 text-xs text-[#5f7387]">아직 캔들 데이터가 충분하지 않습니다. 잠시 후 실시간 이벤트로 갱신됩니다.</p>
+        <p className="mt-3 text-xs text-[#5f7387]">아직 캔들 데이터가 충분하지 않습니다. 잠시 후 다시 확인해주세요.</p>
       ) : null}
     </section>
   );
 }
+

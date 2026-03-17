@@ -11,6 +11,7 @@ from app.schemas.chart import (
     ChartOverlayPoint,
     ChartOverlays,
     ChartResponse,
+    ChartTimeframe,
 )
 from app.services.candles import Candle
 from app.services.indicators import bollinger, rsi, sma
@@ -21,7 +22,13 @@ _SIGNAL_TITLE_MAP = {
     "breakout": "돌파 감시",
     "sell_warning": "매도 경고",
 }
-_TIMEFRAME = "1m"
+_BASE_TIMEFRAME = "1m"
+_TIMEFRAME_TO_MINUTES: dict[ChartTimeframe, int] = {
+    "1m": 1,
+    "5m": 5,
+    "15m": 15,
+    "1h": 60,
+}
 
 
 def _overlay_points_from_sma(candles: list[Candle], period: int) -> list[ChartOverlayPoint]:
@@ -120,7 +127,7 @@ def _dedupe_sort_candles(candles: list[Candle]) -> list[Candle]:
 def _load_persisted_closed_candles(symbol: str, limit: int, db: Session) -> list[Candle]:
     query = (
         select(CandleHistory)
-        .where(CandleHistory.symbol == symbol, CandleHistory.timeframe == _TIMEFRAME)
+        .where(CandleHistory.symbol == symbol, CandleHistory.timeframe == _BASE_TIMEFRAME)
         .order_by(desc(CandleHistory.timestamp))
         .limit(limit)
     )
@@ -140,19 +147,63 @@ def _load_persisted_closed_candles(symbol: str, limit: int, db: Session) -> list
     ]
 
 
+def _bucket_start(ts: datetime, timeframe: ChartTimeframe) -> datetime:
+    normalized = _normalize_ts(ts)
+    bucket_seconds = _TIMEFRAME_TO_MINUTES[timeframe] * 60
+    epoch = int(normalized.timestamp())
+    bucket = epoch - (epoch % bucket_seconds)
+    return datetime.fromtimestamp(bucket, tz=timezone.utc)
+
+
+def _aggregate_candles(candles: list[Candle], timeframe: ChartTimeframe) -> list[Candle]:
+    if timeframe == "1m":
+        return _dedupe_sort_candles(candles)
+
+    if not candles:
+        return []
+
+    ordered = _dedupe_sort_candles(candles)
+    grouped: dict[datetime, Candle] = {}
+
+    for row in ordered:
+        bucket_ts = _bucket_start(row.timestamp, timeframe)
+        current = grouped.get(bucket_ts)
+        if current is None:
+            grouped[bucket_ts] = Candle(
+                symbol=row.symbol,
+                timestamp=bucket_ts,
+                open=row.open,
+                high=row.high,
+                low=row.low,
+                close=row.close,
+                volume=row.volume,
+            )
+            continue
+
+        current.high = max(current.high, row.high)
+        current.low = min(current.low, row.low)
+        current.close = row.close
+        current.volume += row.volume
+
+    return sorted(grouped.values(), key=lambda item: item.timestamp)
+
+
 def get_chart_response(
     symbol: str,
     limit: int,
+    timeframe: ChartTimeframe,
     runtime: MarketRuntime,
     db: Session,
 ) -> ChartResponse:
-    persisted = _load_persisted_closed_candles(symbol=symbol, limit=limit, db=db)
+    fetch_limit = limit * _TIMEFRAME_TO_MINUTES[timeframe] + _TIMEFRAME_TO_MINUTES[timeframe]
+    persisted = _load_persisted_closed_candles(symbol=symbol, limit=fetch_limit, db=db)
     current = runtime.aggregator.get_current_candle(symbol=symbol)
 
-    merged_candles = persisted.copy()
+    merged_candles_1m = persisted.copy()
     if current is not None:
-        merged_candles.append(current)
-    merged_candles = _dedupe_sort_candles(merged_candles)
+        merged_candles_1m.append(current)
+
+    merged_candles = _aggregate_candles(merged_candles_1m, timeframe=timeframe)
     if len(merged_candles) > limit:
         merged_candles = merged_candles[-limit:]
 
@@ -177,7 +228,7 @@ def get_chart_response(
 
     return ChartResponse(
         symbol=symbol,
-        timeframe=_TIMEFRAME,
+        timeframe=timeframe,
         candles=candle_rows,
         overlays=build_chart_overlays(merged_candles),
         markers=to_chart_markers(signal_rows),

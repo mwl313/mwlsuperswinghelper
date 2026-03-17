@@ -53,6 +53,12 @@
   - 워치리스트 행에 포지션 요약(보유상태/진입가/손익률) 표시
   - 워치리스트/차트 탭에서 동일한 포지션 수정 모달 진입 지원
   - 포지션은 watchlist와 분리된 `positions` 모델로 저장(종목당 1개 open 포지션)
+- 차트 가독성 개선(legend + 실토글 + timeframe)
+  - 차트 범례/컬러 키 추가(양봉/음봉/MA20/MA60/볼린저/시그널/거래량/RSI)
+  - 실제 표시 토글 추가: `Candles`, `MA20`, `MA60`, `Bollinger`, `Signal`, `Volume`, `RSI`
+  - 차트 시간프레임 선택 추가: `1m`, `5m`, `15m`, `1h`
+  - 백엔드는 `1m` 저장 캔들을 기준으로 상위 프레임을 집계해 응답
+  - 초기 화면은 전체 fit 대신 최근 구간 중심으로 표시해 캔들 가독성 강화
 
 ## 0.1 Phase 1 UI 정보구조 정리 (로드맵 기준)
 
@@ -150,7 +156,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - `GET /api/settings`
 - `PUT /api/settings`
 - `GET /api/signals`
-- `GET /api/chart/{symbol}?limit=240`
+- `GET /api/chart/{symbol}?limit=240&timeframe=1m|5m|15m|1h`
 - `GET /api/positions`
 - `GET /api/positions/{symbol}`
 - `PATCH /api/positions/{symbol}`
@@ -159,15 +165,28 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 차트 API 빠른 테스트:
 ```bash
-curl "http://127.0.0.1:8000/api/chart/005930?limit=240"
+curl "http://127.0.0.1:8000/api/chart/005930?limit=240&timeframe=1m"
+curl "http://127.0.0.1:8000/api/chart/005930?limit=240&timeframe=5m"
 ```
-- `candles`: 1분봉 OHLCV 배열
+- `candles`: 선택한 timeframe 기준 OHLCV 배열 (`1m`, `5m`, `15m`, `1h`)
 - `overlays`: `ma20`, `ma60`, `bollinger_upper/mid/lower`, `rsi14` 시계열
 - `markers`: 최근 시그널 로그의 차트 마커(매수 후보/돌파 감시/매도 경고)
+
+timeframe 집계 규칙:
+- 소스: persisted `1m` closed candles + 메모리 current `1m` candle
+- `open`: 구간 첫 봉 open
+- `high`: 구간 최고 high
+- `low`: 구간 최저 low
+- `close`: 구간 마지막 close
+- `volume`: 구간 volume 합
 
 실시간 차트 이벤트(WS):
 - `candle_update`: 진행 중 1분봉 OHLCV 갱신
 - `candle_closed`: 1분봉 마감 확정
+
+실시간 갱신 범위:
+- `1m`: WS 이벤트를 즉시 반영(현재 봉 실시간 갱신)
+- `5m/15m/1h`: 봉 마감(`candle_closed`) 시점에 API 재조회로 갱신
 
 차트 히스토리 소스(Phase 7):
 - `candles_1m` 테이블의 persisted closed candles
@@ -304,3 +323,6 @@ KIS 모드 동작 방식(MVP):
 7. 워치리스트 종목 추가 시 `미보유/보유중`을 선택해야 저장되는지 확인
 8. `보유중` 선택 시 진입가 미입력 상태에서 저장이 차단되는지 확인
 9. 워치리스트/차트 탭 모두에서 포지션 수정 모달이 열리고 저장/종료가 반영되는지 확인
+10. 차트 범례에서 `MA20/MA60/Bollinger/Signal/Volume/RSI/Candles` 토글이 실제로 ON/OFF 되는지 확인
+11. 차트 시간프레임을 `1m -> 5m -> 15m -> 1h`로 전환할 때 캔들/지표가 정상 갱신되는지 확인
+12. `1m`에서는 WS 실시간 갱신, 상위 프레임에서는 봉 마감 후 재조회 갱신이 동작하는지 확인

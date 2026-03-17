@@ -201,3 +201,91 @@ Integration points:
   - required keys
   - mock vs kis switching
   - limitations (polling-based live for MVP, no order execution)
+
+## 10) Position Layer Minimum-Change Plan (Watchlist-Centric UI + Separate Model)
+Scope references:
+- `doc/kospi_swing_signal_spec_beginner_side_hustle.md`
+- `doc/superswinghelper_roadmap_checklist.md`
+- `doc/superswinghelper_position_layer_design.md` (primary)
+
+Goal:
+- Add manual position layer without separate tab
+- Keep watchlist as main entry point
+- Keep position data model separated from watchlist model
+
+Implementation steps:
+1. Backend model/service
+- Add `Position` model (single open position per symbol/user).
+- Add position service for:
+  - upsert (holding/not_holding)
+  - close
+  - symbol summary/PnL calculation
+
+2. Backend API integration
+- Add minimal position endpoints:
+  - `GET /api/positions`
+  - `GET /api/positions/{symbol}`
+  - `PATCH /api/positions/{symbol}`
+  - `POST /api/positions/{symbol}/close`
+- Extend watchlist add payload to require `holding_state` and `entry_price` when holding.
+- Keep existing watchlist features intact.
+
+3. Dashboard/live payload extension
+- Extend `watchlist/live` response with per-symbol position summary
+  (`holding_state`, `entry_price`, optional quantity/stop/take/note, pnl values).
+
+4. Frontend watchlist integration
+- Extend add form:
+  - required holding/not_holding selection
+  - required entry price if holding
+  - optional quantity/stop/take/note
+- Show position summary columns in watchlist.
+- Add modal-based position editor per symbol.
+
+5. Frontend chart integration
+- Show compact selected-symbol position summary panel in chart tab.
+- Add “포지션 수정” entry point from chart tab using same modal flow.
+
+6. Verification/docs
+- Add tests for position service behavior.
+- Update README with model/API/flow changes and intentionally excluded scope.
+
+## 11) Chart Readability Minimum-Change Plan (Legend + Toggles + Timeframe)
+Scope references:
+- `doc/kospi_swing_signal_spec_beginner_side_hustle.md`
+- `doc/superswinghelper_roadmap_checklist.md`
+
+Goal:
+- Improve chart readability for beginner users without changing strategy/broker scope.
+- Keep chart data contract stable while adding timeframe query support.
+
+Backend minimum changes:
+1. Add chart timeframe query support in `GET /api/chart/{symbol}`:
+- allowed: `1m`, `5m`, `15m`, `1h`
+2. Keep `1m` as canonical source:
+- read persisted closed `1m` candles + current in-memory `1m` candle
+- aggregate to requested timeframe in chart service layer
+3. Aggregation policy:
+- open=first, high=max, low=min, close=last, volume=sum
+4. Compute overlays on aggregated candles.
+5. Keep markers shape unchanged; filter by chart start timestamp.
+6. Add/adjust tests for timeframe aggregation behavior.
+
+Frontend minimum changes:
+1. Add timeframe selector UI in chart controls.
+2. Add compact legend/color key near chart with active/inactive states.
+3. Make legend/toggle controls functional for:
+- Candles, MA20, MA60, Bollinger, Signal markers, RSI, Volume
+4. Keep 1m websocket live update behavior.
+5. For higher timeframes, keep simple behavior:
+- reload API on candle close or timeframe switch (no multi-timeframe WS stream rewrite)
+6. Improve candle readability:
+- avoid full fit-to-all on first load
+- show recent range by default
+- keep clearer candle body/wick visibility and compact grid style
+
+Out of scope in this phase:
+- new indicators
+- strategy engine changes
+- broker execution/account features
+- major UI re-architecture

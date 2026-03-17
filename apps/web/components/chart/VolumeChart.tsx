@@ -17,10 +17,11 @@ import {
 type VolumeChartProps = {
   volumeData: HistogramData<Time>[];
   rsiData: LineData<Time>[];
+  showVolume: boolean;
   showRsi: boolean;
 };
 
-export function VolumeChart({ volumeData, rsiData, showRsi }: VolumeChartProps) {
+export function VolumeChart({ volumeData, rsiData, showVolume, showRsi }: VolumeChartProps) {
   const volumeContainerRef = useRef<HTMLDivElement | null>(null);
   const volumeChartRef = useRef<IChartApi | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram", Time> | null>(null);
@@ -92,12 +93,12 @@ export function VolumeChart({ volumeData, rsiData, showRsi }: VolumeChartProps) 
   }, []);
 
   useEffect(() => {
-    volumeSeriesRef.current?.setData(volumeData);
-    if (volumeData.length > 0 && !volumeFittedRef.current) {
+    volumeSeriesRef.current?.setData(showVolume ? volumeData : []);
+    if (showVolume && volumeData.length > 0 && !volumeFittedRef.current) {
       volumeChartRef.current?.timeScale().fitContent();
       volumeFittedRef.current = true;
     }
-  }, [volumeData]);
+  }, [volumeData, showVolume]);
 
   useEffect(() => {
     if (!showRsi) {
@@ -190,8 +191,8 @@ export function VolumeChart({ volumeData, rsiData, showRsi }: VolumeChartProps) 
   return (
     <div className="space-y-3">
       <div>
-        <p className="mb-1 text-[11px] font-semibold text-[#5b6f82]">거래량</p>
-        <div className="h-[160px] w-full" ref={volumeContainerRef} />
+        <p className={`mb-1 text-[11px] font-semibold text-[#5b6f82] ${showVolume ? "" : "hidden"}`}>거래량</p>
+        <div className={`h-[160px] w-full ${showVolume ? "" : "hidden"}`} ref={volumeContainerRef} />
       </div>
       {showRsi ? (
         <div>

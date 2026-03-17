@@ -24,7 +24,13 @@ type CandlestickChartProps = {
   bollingerMid: LineData<Time>[];
   bollingerLower: LineData<Time>[];
   markers: SeriesMarker<Time>[];
+  showCandles: boolean;
+  showMa20: boolean;
+  showMa60: boolean;
+  showBollinger: boolean;
   showMarkers: boolean;
+  rangeKey: string;
+  initialVisibleBars: number;
 };
 
 export function CandlestickChart({
@@ -35,11 +41,18 @@ export function CandlestickChart({
   bollingerMid,
   bollingerLower,
   markers,
+  showCandles,
+  showMa20,
+  showMa60,
+  showBollinger,
   showMarkers,
+  rangeKey,
+  initialVisibleBars,
 }: CandlestickChartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const lastCandleCountRef = useRef(0);
+  const initialViewportAppliedRef = useRef(false);
+  const lastRangeKeyRef = useRef<string | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick", Time> | null>(null);
   const ma20SeriesRef = useRef<ISeriesApi<"Line", Time> | null>(null);
   const ma60SeriesRef = useRef<ISeriesApi<"Line", Time> | null>(null);
@@ -71,6 +84,8 @@ export function CandlestickChart({
         borderColor: "#e2e8f0",
         timeVisible: true,
         secondsVisible: false,
+        rightOffset: 4,
+        minBarSpacing: 2,
       },
       crosshair: {
         vertLine: { color: "#94a3b8" },
@@ -119,25 +134,50 @@ export function CandlestickChart({
       bbMidSeriesRef.current = null;
       bbLowerSeriesRef.current = null;
       chartRef.current = null;
-      lastCandleCountRef.current = 0;
+      initialViewportAppliedRef.current = false;
+      lastRangeKeyRef.current = null;
       chart.remove();
     };
   }, []);
 
   useEffect(() => {
-    if (!candleSeriesRef.current) return;
-    candleSeriesRef.current.setData(candles);
-    ma20SeriesRef.current?.setData(ma20);
-    ma60SeriesRef.current?.setData(ma60);
-    bbUpperSeriesRef.current?.setData(bollingerUpper);
-    bbMidSeriesRef.current?.setData(bollingerMid);
-    bbLowerSeriesRef.current?.setData(bollingerLower);
-    markerPluginRef.current?.setMarkers(showMarkers ? markers : []);
-    if (candles.length > 0 && lastCandleCountRef.current === 0) {
-      chartRef.current?.timeScale().fitContent();
+    if (lastRangeKeyRef.current !== rangeKey) {
+      lastRangeKeyRef.current = rangeKey;
+      initialViewportAppliedRef.current = false;
     }
-    lastCandleCountRef.current = candles.length;
-  }, [candles, ma20, ma60, bollingerUpper, bollingerMid, bollingerLower, markers, showMarkers]);
+  }, [rangeKey]);
+
+  useEffect(() => {
+    if (!candleSeriesRef.current) return;
+    candleSeriesRef.current.setData(showCandles ? candles : []);
+    ma20SeriesRef.current?.setData(showMa20 ? ma20 : []);
+    ma60SeriesRef.current?.setData(showMa60 ? ma60 : []);
+    bbUpperSeriesRef.current?.setData(showBollinger ? bollingerUpper : []);
+    bbMidSeriesRef.current?.setData(showBollinger ? bollingerMid : []);
+    bbLowerSeriesRef.current?.setData(showBollinger ? bollingerLower : []);
+    markerPluginRef.current?.setMarkers(showMarkers && showCandles ? markers : []);
+
+    if (showCandles && candles.length > 0 && !initialViewportAppliedRef.current) {
+      const to = candles.length + 5;
+      const from = Math.max(0, candles.length - Math.max(40, initialVisibleBars));
+      chartRef.current?.timeScale().setVisibleLogicalRange({ from, to });
+      initialViewportAppliedRef.current = true;
+    }
+  }, [
+    candles,
+    ma20,
+    ma60,
+    bollingerUpper,
+    bollingerMid,
+    bollingerLower,
+    markers,
+    showCandles,
+    showMa20,
+    showMa60,
+    showBollinger,
+    showMarkers,
+    initialVisibleBars,
+  ]);
 
   return <div className="h-[500px] w-full" ref={containerRef} />;
 }

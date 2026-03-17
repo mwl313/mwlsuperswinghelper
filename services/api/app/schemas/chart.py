@@ -5,6 +5,8 @@ from pydantic import BaseModel
 
 from app.schemas.signal import SignalStrength, SignalType
 
+ChartTimeframe = Literal["1m", "5m", "15m", "1h"]
+
 
 class ChartCandle(BaseModel):
     timestamp: datetime
@@ -39,7 +41,7 @@ class ChartMarker(BaseModel):
 
 class ChartResponse(BaseModel):
     symbol: str
-    timeframe: Literal["1m"] = "1m"
+    timeframe: ChartTimeframe = "1m"
     candles: list[ChartCandle]
     overlays: ChartOverlays
     markers: list[ChartMarker]

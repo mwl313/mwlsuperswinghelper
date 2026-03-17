@@ -1,4 +1,4 @@
-import { ChartResponse, DashboardSummary, LiveWatchlistItem, SignalLog, StrategySettings, SymbolResolveResult, Watchlist } from "./types";
+import { ChartResponse, DashboardSummary, LiveWatchlistItem, PositionSummary, PositionUpsertPayload, SignalLog, StrategySettings, SymbolResolveResult, Watchlist } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api";
 
@@ -38,7 +38,20 @@ export function getLiveWatchlist() {
   return request<LiveWatchlistItem[]>("/watchlist/live");
 }
 
-export function addWatchlistItem(watchlistId: number, payload: { symbol: string; symbol_name?: string; enabled: boolean }) {
+export function addWatchlistItem(
+  watchlistId: number,
+  payload: {
+    symbol: string;
+    symbol_name?: string;
+    enabled: boolean;
+    holding_state: "not_holding" | "holding";
+    entry_price?: number | null;
+    quantity?: number | null;
+    stop_loss_price?: number | null;
+    take_profit_price?: number | null;
+    note?: string | null;
+  }
+) {
   return request(`/watchlists/${watchlistId}/items`, {
     method: "POST",
     body: JSON.stringify(payload),
@@ -75,8 +88,29 @@ export function updateSettings(payload: Omit<StrategySettings, "id" | "user_id" 
   });
 }
 
-export function getChart(symbol: string, limit = 240) {
-  return request<ChartResponse>(`/chart/${symbol}?limit=${limit}`);
+export function getChart(symbol: string, limit = 240, timeframe: "1m" | "5m" | "15m" | "1h" = "1m") {
+  return request<ChartResponse>(`/chart/${symbol}?limit=${limit}&timeframe=${timeframe}`);
+}
+
+export function getPositions() {
+  return request<PositionSummary[]>("/positions");
+}
+
+export function getPosition(symbol: string) {
+  return request<PositionSummary>(`/positions/${symbol}`);
+}
+
+export function updatePosition(symbol: string, payload: PositionUpsertPayload) {
+  return request<PositionSummary>(`/positions/${symbol}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function closePosition(symbol: string) {
+  return request<PositionSummary>(`/positions/${symbol}/close`, {
+    method: "POST",
+  });
 }
 
 export const WS_URL = process.env.NEXT_PUBLIC_WS_URL || getDefaultWsUrl();
