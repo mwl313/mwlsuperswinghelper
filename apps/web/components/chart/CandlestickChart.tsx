@@ -16,6 +16,34 @@ import {
   createSeriesMarkers,
 } from "lightweight-charts";
 
+const tickTimeFormatter = new Intl.DateTimeFormat("ko-KR", {
+  timeZone: "Asia/Seoul",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
+function toEpochMs(time: Time): number {
+  if (typeof time === "number") {
+    return time * 1000;
+  }
+  if (typeof time === "string") {
+    return Date.parse(time);
+  }
+  if ("year" in time) {
+    return Date.UTC(time.year, time.month - 1, time.day);
+  }
+  return 0;
+}
+
+function formatKstTick(time: Time): string {
+  const ms = toEpochMs(time);
+  if (!Number.isFinite(ms) || ms <= 0) {
+    return "";
+  }
+  return tickTimeFormatter.format(new Date(ms));
+}
+
 type CandlestickChartProps = {
   candles: CandlestickData<Time>[];
   ma20: LineData<Time>[];
@@ -86,6 +114,11 @@ export function CandlestickChart({
         secondsVisible: false,
         rightOffset: 4,
         minBarSpacing: 2,
+        tickMarkFormatter: (time: Time) => formatKstTick(time),
+      },
+      localization: {
+        locale: "ko-KR",
+        timeFormatter: (time: Time) => formatKstTick(time),
       },
       crosshair: {
         vertLine: { color: "#94a3b8" },

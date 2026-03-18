@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
@@ -125,9 +125,14 @@ def _dedupe_sort_candles(candles: list[Candle]) -> list[Candle]:
 
 
 def _load_persisted_closed_candles(symbol: str, limit: int, db: Session) -> list[Candle]:
+    upper_bound = datetime.now(timezone.utc) + timedelta(minutes=2)
     query = (
         select(CandleHistory)
-        .where(CandleHistory.symbol == symbol, CandleHistory.timeframe == _BASE_TIMEFRAME)
+        .where(
+            CandleHistory.symbol == symbol,
+            CandleHistory.timeframe == _BASE_TIMEFRAME,
+            CandleHistory.timestamp <= upper_bound,
+        )
         .order_by(desc(CandleHistory.timestamp))
         .limit(limit)
     )

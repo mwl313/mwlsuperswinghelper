@@ -5,23 +5,38 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { ChartSection } from "@/components/chart/ChartSection";
 import { SummarySection } from "@/components/dashboard/SummarySection";
 import { AppTabKey, AppTabs } from "@/components/layout/AppTabs";
-import { SettingsSection, type EditableStrategySettings } from "@/components/settings/SettingsSection";
+import { SettingsSection, type EditableStrategySettings, type KisCredentialFormState } from "@/components/settings/SettingsSection";
 import { SignalsSection } from "@/components/signals/SignalsSection";
 import { WatchlistSection } from "@/components/watchlist/WatchlistSection";
 import {
   WS_URL,
   addWatchlistItem,
   deleteWatchlistItem,
+  getProviderStatus,
   getLiveWatchlist,
   getSettings,
   getSignals,
   getSummary,
   getWatchlists,
   resolveSymbol,
+  saveKisCredentials,
+  switchProviderMode,
+  testProviderConnection,
   updateSettings,
   updateWatchlistItem,
 } from "@/lib/api";
-import { DashboardSummary, LiveSignalEvent, LiveWatchlistItem, SignalLog, SignalType, StrategySettings, Watchlist, WatchlistItem } from "@/lib/types";
+import {
+  DashboardSummary,
+  LiveSignalEvent,
+  LiveWatchlistItem,
+  ProviderMode,
+  ProviderStatus,
+  SignalLog,
+  SignalType,
+  StrategySettings,
+  Watchlist,
+  WatchlistItem,
+} from "@/lib/types";
 
 const signalTypeText: Record<SignalType, string> = {
   buy_candidate: "매수 후보",
@@ -46,6 +61,12 @@ const TABS: { key: AppTabKey; label: string }[] = [
   { key: "settings", label: "설정" },
 ];
 
+const EMPTY_KIS_FORM: KisCredentialFormState = {
+  appKey: "",
+  appSecret: "",
+  baseUrl: "",
+};
+
 function asEditableSettings(settings: StrategySettings): EditableStrategySettings {
   const { id, user_id, created_at, updated_at, ...rest } = settings;
   return rest;
@@ -60,6 +81,11 @@ export default function HomePage() {
   const [signals, setSignals] = useState<SignalLog[]>([]);
   const [settings, setSettings] = useState<StrategySettings | null>(null);
   const [formSettings, setFormSettings] = useState<EditableStrategySettings | null>(null);
+  const [providerStatus, setProviderStatus] = useState<ProviderStatus | null>(null);
+  const [providerStatusLoading, setProviderStatusLoading] = useState(false);
+  const [providerActionLoading, setProviderActionLoading] = useState(false);
+  const [providerMessage, setProviderMessage] = useState<string | null>(null);
+  const [kisForm, setKisForm] = useState<KisCredentialFormState>(EMPTY_KIS_FORM);
   const [newSymbol, setNewSymbol] = useState("");
   const [resolvedSymbolName, setResolvedSymbolName] = useState<string | null>(null);
   const [isResolvingSymbol, setIsResolvingSymbol] = useState(false);
@@ -140,19 +166,45 @@ export default function HomePage() {
     }
   }
 
+  async function refreshProviderStatus(showLoading = false) {
+    if (showLoading) {
+      setProviderStatusLoading(true);
+    }
+    try {
+      const status = await getProviderStatus();
+      setProviderStatus(status);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Provider 상태 조회 실패");
+    } finally {
+      if (showLoading) {
+        setProviderStatusLoading(false);
+      }
+    }
+  }
+
   useEffect(() => {
     void refreshStatic();
     void refreshLive();
     void refreshSettings();
+    void refreshProviderStatus(true);
   }, []);
 
   useEffect(() => {
     const timer = setInterval(() => {
       void refreshStatic();
       void refreshLive();
+      if (activeTab === "settings") {
+        void refreshProviderStatus(false);
+      }
     }, 5000);
     return () => clearInterval(timer);
-  }, []);
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === "settings") {
+      void refreshProviderStatus(true);
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     const sanitized = newSymbol.replace(/\D/g, "").slice(0, 6);
@@ -247,6 +299,7 @@ export default function HomePage() {
       await addWatchlistItem(currentWatchlist.id, {
         symbol: newSymbol.trim(),
         enabled: true,
+        holding_state: "not_holding",
       });
       await refreshStatic();
       await refreshLive();
@@ -296,6 +349,56 @@ export default function HomePage() {
     await Notification.requestPermission();
   }
 
+  async function onSaveKisCredentials(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!kisForm.appKey.trim() || !kisForm.appSecret.trim()) {
+      setProviderMessage("App Key와 App Secret을 모두 입력하세요.");
+      return;
+    }
+
+    setProviderActionLoading(true);
+    try {
+      const result = await saveKisCredentials({
+        appKey: kisForm.appKey.trim(),
+        appSecret: kisForm.appSecret.trim(),
+        baseUrl: kisForm.baseUrl.trim() || undefined,
+      });
+      setProviderMessage(result.ok ? "KIS 자격증명을 서버에 저장했습니다." : "KIS 자격증명 저장 실패");
+      setKisForm((prev) => ({ ...prev, appKey: "", appSecret: "" }));
+      await refreshProviderStatus();
+    } catch (e) {
+      setProviderMessage(e instanceof Error ? e.message : "KIS 자격증명 저장 실패");
+    } finally {
+      setProviderActionLoading(false);
+    }
+  }
+
+  async function onSwitchProviderMode(mode: ProviderMode) {
+    setProviderActionLoading(true);
+    try {
+      const status = await switchProviderMode(mode);
+      setProviderStatus(status);
+      setProviderMessage(`Provider 모드를 ${mode.toUpperCase()}로 전환했습니다.`);
+    } catch (e) {
+      setProviderMessage(e instanceof Error ? e.message : "Provider 모드 전환 실패");
+    } finally {
+      setProviderActionLoading(false);
+    }
+  }
+
+  async function onTestProviderConnection() {
+    setProviderActionLoading(true);
+    try {
+      const result = await testProviderConnection();
+      setProviderMessage(result.message);
+      await refreshProviderStatus();
+    } catch (e) {
+      setProviderMessage(e instanceof Error ? e.message : "KIS 연결 테스트 실패");
+    } finally {
+      setProviderActionLoading(false);
+    }
+  }
+
   function onOpenChart(symbol: string) {
     setSelectedChartSymbol(symbol);
     setActiveTab("chart");
@@ -333,11 +436,27 @@ export default function HomePage() {
           onSelectSymbol={setSelectedChartSymbol}
           liveQuote={selectedChartSymbol ? (liveRowMap.get(selectedChartSymbol) ?? null) : null}
           recentSignal={selectedChartSymbol ? (latestSignalMap.get(selectedChartSymbol) ?? null) : null}
+          onOpenPositionEditor={() => {
+            setActiveTab("watchlist");
+          }}
         />
       ) : null}
       {activeTab === "signals" ? <SignalsSection signals={signals} /> : null}
       {activeTab === "settings" ? (
-        <SettingsSection formSettings={formSettings} onChange={setFormSettings} onSave={onSaveSettings} />
+        <SettingsSection
+          formSettings={formSettings}
+          onChange={setFormSettings}
+          onSave={onSaveSettings}
+          providerStatus={providerStatus}
+          providerStatusLoading={providerStatusLoading}
+          providerActionLoading={providerActionLoading}
+          providerMessage={providerMessage}
+          kisForm={kisForm}
+          onKisFormChange={setKisForm}
+          onSaveKisCredentials={onSaveKisCredentials}
+          onSwitchProviderMode={onSwitchProviderMode}
+          onTestProviderConnection={onTestProviderConnection}
+        />
       ) : null}
     </main>
   );

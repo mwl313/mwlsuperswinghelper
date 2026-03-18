@@ -173,3 +173,39 @@ export type PositionUpsertPayload = {
   take_profit_price?: number | null;
   note?: string | null;
 };
+
+export type ProviderMode = "mock" | "kis";
+
+export type ProviderStatus = {
+  mode: ProviderMode;
+  kisConfigured: boolean;
+  runtimeHealthy: boolean;
+  lastError: string | null;
+  lastUpdateAt: string | null;
+  supportsSwitching: boolean;
+  lastSwitchAt: string | null;
+  hasAppKey: boolean;
+  hasAppSecret: boolean;
+};
+
+export type KisCredentialsPayload = {
+  appKey: string;
+  appSecret: string;
+  baseUrl?: string | null;
+};
+
+export type KisCredentialsSaveResult = {
+  ok: boolean;
+  kisConfigured: boolean;
+  hasAppKey: boolean;
+  hasAppSecret: boolean;
+  baseUrlSet: boolean;
+  updatedAt: string;
+};
+
+export type ProviderConnectionTestResult = {
+  ok: boolean;
+  mode: ProviderMode;
+  message: string;
+  testedAt: string;
+};

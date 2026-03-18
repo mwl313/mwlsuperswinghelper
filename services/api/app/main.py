@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import chart, dashboard, settings, signals, symbols, watchlists, ws
+from app.api import chart, dashboard, settings, signals, symbols, system, watchlists, ws
 from app.core.config import get_settings
 from app.db.seed import init_db
 from app.services.ws_manager import WSManager
@@ -41,6 +41,7 @@ app.include_router(signals.router, prefix=settings_obj.api_prefix)
 app.include_router(chart.router, prefix=settings_obj.api_prefix)
 app.include_router(symbols.router, prefix=settings_obj.api_prefix)
 app.include_router(dashboard.router, prefix=settings_obj.api_prefix)
+app.include_router(system.router, prefix=settings_obj.api_prefix)
 app.include_router(ws.router)
 
 

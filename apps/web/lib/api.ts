@@ -1,4 +1,19 @@
-import { ChartResponse, DashboardSummary, LiveWatchlistItem, PositionSummary, PositionUpsertPayload, SignalLog, StrategySettings, SymbolResolveResult, Watchlist } from "./types";
+import {
+  ChartResponse,
+  DashboardSummary,
+  KisCredentialsPayload,
+  KisCredentialsSaveResult,
+  LiveWatchlistItem,
+  PositionSummary,
+  PositionUpsertPayload,
+  ProviderConnectionTestResult,
+  ProviderMode,
+  ProviderStatus,
+  SignalLog,
+  StrategySettings,
+  SymbolResolveResult,
+  Watchlist,
+} from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api";
 
@@ -109,6 +124,30 @@ export function updatePosition(symbol: string, payload: PositionUpsertPayload) {
 
 export function closePosition(symbol: string) {
   return request<PositionSummary>(`/positions/${symbol}/close`, {
+    method: "POST",
+  });
+}
+
+export function getProviderStatus() {
+  return request<ProviderStatus>("/system/provider-status");
+}
+
+export function saveKisCredentials(payload: KisCredentialsPayload) {
+  return request<KisCredentialsSaveResult>("/system/kis-credentials", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function switchProviderMode(mode: ProviderMode) {
+  return request<ProviderStatus>("/system/provider-mode", {
+    method: "PATCH",
+    body: JSON.stringify({ mode }),
+  });
+}
+
+export function testProviderConnection() {
+  return request<ProviderConnectionTestResult>("/system/provider-test", {
     method: "POST",
   });
 }

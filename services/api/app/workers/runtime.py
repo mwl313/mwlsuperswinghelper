@@ -2,8 +2,9 @@ import asyncio
 import logging
 from collections import deque
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
-from sqlalchemy import desc, select
+from sqlalchemy import delete, desc, select
 
 from app.core.config import get_settings
 from app.db.session import SessionLocal
@@ -17,6 +18,13 @@ from app.services.market_data.kis_adapter import KoreaInvestmentAdapter
 from app.services.market_data.mock_provider import MockMarketDataProvider
 from app.services.notifications.telegram import send_telegram_message
 from app.services.signals.engine import SignalDecision, evaluate_signals
+from app.services.system_config import (
+    RuntimeProviderConfig,
+    load_runtime_provider_config,
+    normalize_provider_mode,
+    save_kis_credentials as save_kis_credentials_to_store,
+    update_provider_mode as update_provider_mode_to_store,
+)
 from app.services.ws_manager import WSManager
 
 logger = logging.getLogger(__name__)
@@ -27,17 +35,28 @@ class MarketRuntime:
         settings = get_settings()
         self.settings = settings
         self.ws_manager = ws_manager
-        self.provider = self._build_provider()
+
+        config = self._load_provider_config_from_store()
+        self.provider_mode: Literal["mock", "kis"] = config.mode
+        self.kis_app_key = config.kis_app_key
+        self.kis_app_secret = config.kis_app_secret
+        self.kis_base_url = config.kis_base_url
+
+        self.provider = self._build_provider(self.provider_mode)
         self.aggregator = CandleAggregator(
             candle_seconds=settings.candle_seconds,
             max_candles_per_symbol=settings.max_candles_per_symbol,
         )
         self._task: asyncio.Task | None = None
         self._stop_event = asyncio.Event()
+        self._switch_lock = asyncio.Lock()
         self.last_signal_times: dict[tuple[str, str], datetime] = {}
         self.latest_quotes: dict[str, dict] = {}
         self.recent_signals: deque[dict] = deque(maxlen=200)
         self.history_seeded_symbols: set[str] = set()
+        self.last_runtime_error: str | None = None
+        self.last_quote_update_at: datetime | None = None
+        self.last_provider_switch_at: datetime | None = None
 
     @staticmethod
     def _candle_event_payload(event_type: str, symbol: str, candle: Candle) -> dict:
@@ -55,12 +74,19 @@ class MarketRuntime:
             },
         }
 
-    def _build_provider(self) -> MarketDataProvider:
-        if self.settings.market_data_provider == "kis":
+    def _load_provider_config_from_store(self) -> RuntimeProviderConfig:
+        with SessionLocal() as db:
+            return load_runtime_provider_config(db, self.settings)
+
+    def _is_kis_configured(self) -> bool:
+        return bool(self.kis_app_key and self.kis_app_secret)
+
+    def _build_provider(self, mode: Literal["mock", "kis"]) -> MarketDataProvider:
+        if mode == "kis":
             return KoreaInvestmentAdapter(
-                app_key=self.settings.kis_app_key,
-                app_secret=self.settings.kis_app_secret,
-                base_url=self.settings.kis_base_url,
+                app_key=self.kis_app_key,
+                app_secret=self.kis_app_secret,
+                base_url=self.kis_base_url,
                 poll_interval_seconds=self.settings.kis_poll_interval_seconds,
                 request_timeout_seconds=self.settings.kis_request_timeout_seconds,
                 market_div_code=self.settings.kis_market_div_code,
@@ -72,6 +98,140 @@ class MarketRuntime:
             volatility=self.settings.mock_price_volatility,
         )
 
+    def _reset_runtime_state(self) -> None:
+        self.aggregator = CandleAggregator(
+            candle_seconds=self.settings.candle_seconds,
+            max_candles_per_symbol=self.settings.max_candles_per_symbol,
+        )
+        self.last_signal_times.clear()
+        self.latest_quotes.clear()
+        self.recent_signals.clear()
+        self.history_seeded_symbols.clear()
+        self.last_quote_update_at = None
+        self.last_runtime_error = None
+
+    async def _restart_runtime_for_provider(self, mode: Literal["mock", "kis"]) -> None:
+        await self.stop()
+        self.provider_mode = mode
+        self.provider = self._build_provider(mode)
+        self._reset_runtime_state()
+        await self.start()
+
+    def get_provider_status(self) -> dict:
+        runtime_running = bool(self._task and not self._task.done())
+        return {
+            "mode": self.provider_mode,
+            "kisConfigured": self._is_kis_configured(),
+            "runtimeHealthy": runtime_running and self.last_runtime_error is None,
+            "lastError": self.last_runtime_error,
+            "lastUpdateAt": self.last_quote_update_at,
+            "supportsSwitching": True,
+            "lastSwitchAt": self.last_provider_switch_at,
+            "hasAppKey": bool(self.kis_app_key),
+            "hasAppSecret": bool(self.kis_app_secret),
+        }
+
+    async def save_kis_credentials(self, app_key: str, app_secret: str, base_url: str | None) -> dict:
+        if not app_key.strip() or not app_secret.strip():
+            raise ValueError("KIS App Key/App Secret는 필수입니다.")
+
+        async with self._switch_lock:
+            with SessionLocal() as db:
+                save_kis_credentials_to_store(
+                    db=db,
+                    settings=self.settings,
+                    app_key=app_key,
+                    app_secret=app_secret,
+                    base_url=base_url,
+                )
+                loaded = load_runtime_provider_config(db, self.settings)
+
+            self.kis_app_key = loaded.kis_app_key
+            self.kis_app_secret = loaded.kis_app_secret
+            self.kis_base_url = loaded.kis_base_url
+
+            if self.provider_mode == "kis":
+                await self._restart_runtime_for_provider("kis")
+
+        return self.get_provider_status()
+
+    async def switch_provider_mode(self, mode: Literal["mock", "kis"]) -> dict:
+        target = normalize_provider_mode(mode)
+        if target == "kis" and not self._is_kis_configured():
+            raise ValueError("KIS 자격증명이 설정되지 않았습니다. 먼저 저장하세요.")
+
+        async with self._switch_lock:
+            if target == self.provider_mode:
+                with SessionLocal() as db:
+                    update_provider_mode_to_store(db=db, settings=self.settings, mode=target)
+                return self.get_provider_status()
+
+            previous_mode = self.provider_mode
+            try:
+                with SessionLocal() as db:
+                    update_provider_mode_to_store(db=db, settings=self.settings, mode=target)
+
+                if target == "kis" and previous_mode != "kis":
+                    enabled_symbols = [item.symbol for item in self._get_enabled_items()]
+                    self._purge_persisted_candles(enabled_symbols)
+
+                await self._restart_runtime_for_provider(target)
+                self.last_provider_switch_at = datetime.now(timezone.utc)
+            except Exception as exc:
+                logger.exception("provider switch failed: %s", exc)
+                with SessionLocal() as db:
+                    update_provider_mode_to_store(db=db, settings=self.settings, mode=previous_mode)
+                try:
+                    await self._restart_runtime_for_provider(previous_mode)
+                except Exception as rollback_exc:
+                    logger.exception("provider rollback failed: %s", rollback_exc)
+                raise ValueError("Provider 모드 전환에 실패했습니다.") from exc
+
+        return self.get_provider_status()
+
+    async def test_kis_connection(self) -> dict:
+        tested_at = datetime.now(timezone.utc)
+        if not self._is_kis_configured():
+            return {
+                "ok": False,
+                "mode": self.provider_mode,
+                "message": "KIS 자격증명이 저장되지 않았습니다.",
+                "testedAt": tested_at,
+            }
+
+        adapter = KoreaInvestmentAdapter(
+            app_key=self.kis_app_key,
+            app_secret=self.kis_app_secret,
+            base_url=self.kis_base_url,
+            poll_interval_seconds=self.settings.kis_poll_interval_seconds,
+            request_timeout_seconds=self.settings.kis_request_timeout_seconds,
+            market_div_code=self.settings.kis_market_div_code,
+            quote_tr_id=self.settings.kis_quote_tr_id,
+            intraday_tr_id=self.settings.kis_intraday_tr_id,
+        )
+        try:
+            token = await adapter._ensure_access_token()  # noqa: SLF001
+            if not token:
+                return {
+                    "ok": False,
+                    "mode": self.provider_mode,
+                    "message": "KIS 토큰 발급 실패",
+                    "testedAt": tested_at,
+                }
+            return {
+                "ok": True,
+                "mode": self.provider_mode,
+                "message": "KIS 연결 테스트 성공",
+                "testedAt": tested_at,
+            }
+        except Exception as exc:
+            return {
+                "ok": False,
+                "mode": self.provider_mode,
+                "message": f"KIS 연결 테스트 실패: {exc}",
+                "testedAt": tested_at,
+            }
+
     async def start(self) -> None:
         if self._task and not self._task.done():
             return
@@ -82,6 +242,7 @@ class MarketRuntime:
         self._stop_event.set()
         if self._task:
             await self._task
+        self._task = None
 
     def _get_enabled_items(self) -> list[WatchlistItem]:
         with SessionLocal() as db:
@@ -164,12 +325,45 @@ class MarketRuntime:
                 existing.volume = candle.volume
             db.commit()
 
+    @staticmethod
+    def _history_upper_time_bound() -> datetime:
+        # Guardrail: treat candles too far in the future as invalid noise.
+        return datetime.now(timezone.utc) + timedelta(minutes=2)
+
+    def _purge_persisted_candles(self, symbols: list[str]) -> None:
+        if not symbols:
+            return
+        with SessionLocal() as db:
+            db.execute(
+                delete(CandleHistory).where(
+                    CandleHistory.timeframe == "1m",
+                    CandleHistory.symbol.in_(symbols),
+                )
+            )
+            db.commit()
+
+    def _purge_future_candles(self) -> None:
+        upper_bound = self._history_upper_time_bound()
+        with SessionLocal() as db:
+            db.execute(
+                delete(CandleHistory).where(
+                    CandleHistory.timeframe == "1m",
+                    CandleHistory.timestamp > upper_bound,
+                )
+            )
+            db.commit()
+
     def _load_recent_closed_candles(self, symbol: str, limit: int) -> list[Candle]:
+        upper_bound = self._history_upper_time_bound()
         with SessionLocal() as db:
             rows = list(
                 db.scalars(
                     select(CandleHistory)
-                    .where(CandleHistory.symbol == symbol, CandleHistory.timeframe == "1m")
+                    .where(
+                        CandleHistory.symbol == symbol,
+                        CandleHistory.timeframe == "1m",
+                        CandleHistory.timestamp <= upper_bound,
+                    )
                     .order_by(desc(CandleHistory.timestamp))
                     .limit(limit)
                 ).all()
@@ -189,10 +383,8 @@ class MarketRuntime:
         ]
 
     async def _seed_symbol_history(self, symbol: str) -> None:
-        # 1) Reuse persisted history first.
         persisted = self._load_recent_closed_candles(symbol=symbol, limit=self.settings.kis_history_seed_limit)
         if persisted and isinstance(self.provider, MockMarketDataProvider):
-            # In mock mode, continue from latest persisted timestamp so chart time and tick time stay aligned.
             self.provider.align_virtual_time(persisted[-1].timestamp)
 
         if len(persisted) >= min(self.settings.kis_history_seed_limit, 60):
@@ -200,7 +392,6 @@ class MarketRuntime:
             self.history_seeded_symbols.add(symbol)
             return
 
-        # 2) Fetch provider history (KIS real data in kis mode).
         fetched_rows: list[MarketCandle] = []
         try:
             fetched_rows = await self.provider.get_recent_candles(symbol=symbol, limit=self.settings.kis_history_seed_limit)
@@ -271,52 +462,62 @@ class MarketRuntime:
 
     async def _run_loop(self) -> None:
         while not self._stop_event.is_set():
-            items = self._get_enabled_items()
-            if not items:
-                await asyncio.sleep(1)
-                continue
-
-            symbol_to_name = {item.symbol: item.symbol_name for item in items}
-            symbols = list(symbol_to_name.keys())
-            await self._ensure_seeded_histories(symbols)
-            ticks = await self.provider.get_ticks(symbols)
-            strategy_settings = self._get_settings()
-            if strategy_settings is None:
-                continue
-
-            for tick in ticks:
-                prev = self.latest_quotes.get(tick.symbol)
-                prev_price = prev["price"] if prev else tick.price
-                change_percent = ((tick.price - prev_price) / prev_price * 100) if prev_price else 0.0
-                quote_payload = {
-                    "symbol": tick.symbol,
-                    "symbol_name": symbol_to_name.get(tick.symbol, tick.symbol),
-                    "price": tick.price,
-                    "volume": tick.volume,
-                    "timestamp": tick.timestamp.isoformat(),
-                    "change_percent": round(change_percent, 3),
-                }
-                self.latest_quotes[tick.symbol] = quote_payload
-                await self.ws_manager.broadcast({"type": "live", "data": quote_payload})
-
-                closed = self.aggregator.add_tick(tick)
-                current_candles = self.aggregator.get_recent_candles(tick.symbol, include_current=True)
-                if current_candles:
-                    current_candle = current_candles[-1]
-                    await self.ws_manager.broadcast(self._candle_event_payload("candle_update", tick.symbol, current_candle))
-
-                if closed is None:
+            try:
+                self._purge_future_candles()
+                items = self._get_enabled_items()
+                if not items:
+                    await asyncio.sleep(1)
                     continue
 
-                self._upsert_closed_candle(closed)
-                await self.ws_manager.broadcast(self._candle_event_payload("candle_closed", tick.symbol, closed))
-                candles = self.aggregator.get_recent_candles(tick.symbol, include_current=False)
-                await self._handle_closed_candle(
-                    symbol=tick.symbol,
-                    symbol_name=symbol_to_name.get(tick.symbol, tick.symbol),
-                    strategy_settings=strategy_settings,
-                    candles=candles,
-                )
+                symbol_to_name = {item.symbol: item.symbol_name for item in items}
+                symbols = list(symbol_to_name.keys())
+                await self._ensure_seeded_histories(symbols)
+                ticks = await self.provider.get_ticks(symbols)
+                strategy_settings = self._get_settings()
+                if strategy_settings is None:
+                    continue
+
+                if ticks:
+                    self.last_runtime_error = None
+
+                for tick in ticks:
+                    prev = self.latest_quotes.get(tick.symbol)
+                    prev_price = prev["price"] if prev else tick.price
+                    change_percent = ((tick.price - prev_price) / prev_price * 100) if prev_price else 0.0
+                    quote_payload = {
+                        "symbol": tick.symbol,
+                        "symbol_name": symbol_to_name.get(tick.symbol, tick.symbol),
+                        "price": tick.price,
+                        "volume": tick.volume,
+                        "timestamp": tick.timestamp.isoformat(),
+                        "change_percent": round(change_percent, 3),
+                    }
+                    self.latest_quotes[tick.symbol] = quote_payload
+                    self.last_quote_update_at = tick.timestamp
+                    await self.ws_manager.broadcast({"type": "live", "data": quote_payload})
+
+                    closed = self.aggregator.add_tick(tick)
+                    current_candles = self.aggregator.get_recent_candles(tick.symbol, include_current=True)
+                    if current_candles:
+                        current_candle = current_candles[-1]
+                        await self.ws_manager.broadcast(self._candle_event_payload("candle_update", tick.symbol, current_candle))
+
+                    if closed is None:
+                        continue
+
+                    self._upsert_closed_candle(closed)
+                    await self.ws_manager.broadcast(self._candle_event_payload("candle_closed", tick.symbol, closed))
+                    candles = self.aggregator.get_recent_candles(tick.symbol, include_current=False)
+                    await self._handle_closed_candle(
+                        symbol=tick.symbol,
+                        symbol_name=symbol_to_name.get(tick.symbol, tick.symbol),
+                        strategy_settings=strategy_settings,
+                        candles=candles,
+                    )
+            except Exception as exc:
+                logger.exception("runtime loop error: %s", exc)
+                self.last_runtime_error = str(exc)
+                await asyncio.sleep(1)
 
     def get_dashboard_summary(self) -> dict:
         with SessionLocal() as db:
@@ -337,7 +538,7 @@ class MarketRuntime:
                 if signal.signal_strength == "strong"
             }
         )
-        market_status = "mock-open" if self.settings.market_data_provider == "mock" else "broker-link"
+        market_status = "mock-open" if self.provider_mode == "mock" else "broker-link"
         return {
             "market_status": market_status,
             "today_signal_count": len(today_signals),

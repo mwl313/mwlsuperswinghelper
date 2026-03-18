@@ -1,7 +1,11 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+DEFAULT_DB_PATH = Path(__file__).resolve().parents[4] / "app.db"
 
 
 class Settings(BaseSettings):
@@ -13,7 +17,7 @@ class Settings(BaseSettings):
 
     app_name: str = "KOSPI Swing Signal API"
     api_prefix: str = "/api"
-    database_url: str = "sqlite:///./app.db"
+    database_url: str = f"sqlite:///{DEFAULT_DB_PATH.as_posix()}"
 
     market_data_provider: str = "mock"  # mock | kis
     default_symbols: str = "005930,000660,035420,051910,068270"

@@ -59,6 +59,17 @@
   - 차트 시간프레임 선택 추가: `1m`, `5m`, `15m`, `1h`
   - 백엔드는 `1m` 저장 캔들을 기준으로 상위 프레임을 집계해 응답
   - 초기 화면은 전체 fit 대신 최근 구간 중심으로 표시해 캔들 가독성 강화
+- Provider 설정 UI 추가(KIS 자격증명 + 모드 제어)
+  - 설정 탭에서 `KIS App Key / App Secret / Base URL` 저장 가능(빨간 경고 박스 포함)
+  - 자격증명은 서버(`system_config`)에 저장되고, 저장 후 브라우저에 재노출하지 않음
+  - `현재 모드/헬스/최근 오류/최근 업데이트` 상태 표시
+  - `KIS 연결 테스트`, `Mock/KIS 모드 전환` 버튼 제공
+  - KIS 자격증명 저장 전에는 KIS 테스트/전환 비활성화
+- KIS 모드 차트 정합성 안정화
+  - `Mock -> KIS` 전환 시 감시 종목의 기존 persisted candle을 초기화 후 KIS 히스토리로 재시드
+  - 차트/런타임 로드 시 미래 시각 candle을 자동 제외(오염 데이터 방어)
+  - 차트 축 시간 포맷을 KST 기준으로 통일(헤더 시각과 일관성 강화)
+  - 기본 DB 경로를 프로젝트 루트 `app.db`로 고정해 실행 위치별 DB 분기 문제 완화
 
 ## 0.1 Phase 1 UI 정보구조 정리 (로드맵 기준)
 
@@ -161,6 +172,10 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - `GET /api/positions/{symbol}`
 - `PATCH /api/positions/{symbol}`
 - `POST /api/positions/{symbol}/close`
+- `GET /api/system/provider-status`
+- `POST /api/system/kis-credentials`
+- `PATCH /api/system/provider-mode`
+- `POST /api/system/provider-test`
 - `WS /ws/live-signals`
 
 차트 API 빠른 테스트:
@@ -267,17 +282,26 @@ PostgreSQL로 교체하려면 `.env`에서 `DATABASE_URL`만 변경하면 됩니
 - `app/services/market_data/kis_adapter.py` (KIS 인증/시세/분봉 연동)
 - `app/workers/runtime.py`의 `_build_provider()`에서 선택
 
-KIS 모드 실행:
-1. `.env`(또는 `services/api/.env`)에 아래 값 설정
-   - `MARKET_DATA_PROVIDER=kis`
-   - `KIS_APP_KEY=...`
-   - `KIS_APP_SECRET=...`
-2. 필요 시 환경별 값 조정
-   - `KIS_BASE_URL` (기본: 실서버)
-   - `KIS_POLL_INTERVAL_SECONDS`
-   - `KIS_HISTORY_SEED_LIMIT`
-   - `KIS_QUOTE_TR_ID`
-   - `KIS_INTRADAY_TR_ID`
+KIS 모드 실행(권장: UI):
+1. 설정 탭 > `KIS 자격증명` 카드에서 `App Key / App Secret` 입력 후 저장
+2. 설정 탭 > `Provider 제어`에서 `KIS 연결 테스트`
+3. `KIS 모드` 버튼으로 전환
+4. 상태 카드에서 `현재 모드`, `KIS 설정`, `런타임 상태` 확인
+
+환경변수로도 초기값 설정 가능:
+- `MARKET_DATA_PROVIDER` (`mock` | `kis`)
+- `KIS_APP_KEY`
+- `KIS_APP_SECRET`
+- `KIS_BASE_URL`
+- `KIS_POLL_INTERVAL_SECONDS`
+- `KIS_HISTORY_SEED_LIMIT`
+- `KIS_QUOTE_TR_ID`
+- `KIS_INTRADAY_TR_ID`
+
+보안/취급 주의(현재 private-use 단계):
+- KIS 비밀값은 브라우저 localStorage에 저장하지 않음
+- 저장된 비밀값을 상태 API에서 평문으로 반환하지 않음
+- 자격증명 저장 성공 후 입력 폼은 비워서 재노출을 줄임
 
 KIS 모드 동작 방식(MVP):
 - 초기 히스토리: KIS 분봉 조회(`inquire-time-itemchartprice`) -> DB(`candles_1m`) 저장 -> 런타임 시드

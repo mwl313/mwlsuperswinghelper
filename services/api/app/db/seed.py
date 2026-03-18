@@ -17,20 +17,18 @@ DEFAULT_ITEMS = [
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     with SessionLocal() as db:
+        created_default_watchlist = False
         watchlist = db.scalar(select(Watchlist).where(Watchlist.user_id == 1, Watchlist.name == "기본 워치리스트"))
         if watchlist is None:
             watchlist = Watchlist(user_id=1, name="기본 워치리스트")
             db.add(watchlist)
             db.flush()
+            created_default_watchlist = True
 
-        existing_symbols = {
-            row[0]
-            for row in db.execute(
-                select(WatchlistItem.symbol).where(WatchlistItem.watchlist_id == watchlist.id)
-            ).all()
-        }
-        for symbol, symbol_name in DEFAULT_ITEMS:
-            if symbol not in existing_symbols:
+        # 기본 종목은 "최초 설치/최초 생성" 시에만 넣고,
+        # 이후에는 사용자가 삭제/수정한 상태를 그대로 유지한다.
+        if created_default_watchlist:
+            for symbol, symbol_name in DEFAULT_ITEMS:
                 db.add(
                     WatchlistItem(
                         watchlist_id=watchlist.id,

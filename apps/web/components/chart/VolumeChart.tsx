@@ -14,6 +14,34 @@ import {
   createChart,
 } from "lightweight-charts";
 
+const tickTimeFormatter = new Intl.DateTimeFormat("ko-KR", {
+  timeZone: "Asia/Seoul",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
+function toEpochMs(time: Time): number {
+  if (typeof time === "number") {
+    return time * 1000;
+  }
+  if (typeof time === "string") {
+    return Date.parse(time);
+  }
+  if ("year" in time) {
+    return Date.UTC(time.year, time.month - 1, time.day);
+  }
+  return 0;
+}
+
+function formatKstTick(time: Time): string {
+  const ms = toEpochMs(time);
+  if (!Number.isFinite(ms) || ms <= 0) {
+    return "";
+  }
+  return tickTimeFormatter.format(new Date(ms));
+}
+
 type VolumeChartProps = {
   volumeData: HistogramData<Time>[];
   rsiData: LineData<Time>[];
@@ -64,6 +92,11 @@ export function VolumeChart({ volumeData, rsiData, showVolume, showRsi }: Volume
         borderColor: "#e2e8f0",
         timeVisible: true,
         secondsVisible: false,
+        tickMarkFormatter: (time: Time) => formatKstTick(time),
+      },
+      localization: {
+        locale: "ko-KR",
+        timeFormatter: (time: Time) => formatKstTick(time),
       },
     });
 
@@ -135,6 +168,11 @@ export function VolumeChart({ volumeData, rsiData, showVolume, showRsi }: Volume
         borderColor: "#e2e8f0",
         timeVisible: true,
         secondsVisible: false,
+        tickMarkFormatter: (time: Time) => formatKstTick(time),
+      },
+      localization: {
+        locale: "ko-KR",
+        timeFormatter: (time: Time) => formatKstTick(time),
       },
     });
 

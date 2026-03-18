@@ -67,6 +67,22 @@ function toMs(timestamp: string): number {
   return Number.isNaN(ms) ? 0 : ms;
 }
 
+function normalizeCandles(candles: ChartCandle[], maxLength = 240): ChartCandle[] {
+  const indexed = new Map<number, ChartCandle>();
+  for (const candle of candles) {
+    const ms = toMs(candle.timestamp);
+    if (!ms) continue;
+    indexed.set(ms, candle);
+  }
+  const ordered = [...indexed.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([, candle]) => candle);
+  if (ordered.length <= maxLength) {
+    return ordered;
+  }
+  return ordered.slice(-maxLength);
+}
+
 function numberFormat(value: number | null | undefined, digits = 2): string {
   if (value === null || value === undefined) return "-";
   return value.toLocaleString("ko-KR", { maximumFractionDigits: digits });
@@ -162,8 +178,8 @@ function mergeCandles(current: ChartCandle[], incoming: ChartCandle, eventType: 
   const incomingTs = toMs(incoming.timestamp);
   if (!incomingTs) return current;
 
-  const next = [...current];
-  const existingIndex = next.findIndex((row) => row.timestamp === incoming.timestamp);
+  const next = normalizeCandles(current, maxLength + 1);
+  const existingIndex = next.findIndex((row) => toMs(row.timestamp) === incomingTs);
   const last = next[next.length - 1];
   const lastTs = last ? toMs(last.timestamp) : 0;
 
@@ -174,7 +190,7 @@ function mergeCandles(current: ChartCandle[], incoming: ChartCandle, eventType: 
     }
     if (incomingTs >= lastTs) {
       next.push(incoming);
-      return next.slice(-maxLength);
+      return normalizeCandles(next, maxLength);
     }
     return current;
   }
@@ -185,7 +201,7 @@ function mergeCandles(current: ChartCandle[], incoming: ChartCandle, eventType: 
   }
   if (incomingTs > lastTs) {
     next.push(incoming);
-    return next.slice(-maxLength);
+    return normalizeCandles(next, maxLength);
   }
   return current;
 }
@@ -211,7 +227,8 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
     setIsLoading(true);
     try {
       const data = await getChart(selectedSymbol, 240, timeframe);
-      setChartData({ ...data, overlays: recalcOverlays(data.candles) });
+      const normalizedCandles = normalizeCandles(data.candles, 240);
+      setChartData({ ...data, candles: normalizedCandles, overlays: recalcOverlays(normalizedCandles) });
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "차트 데이터 조회 실패");
@@ -297,7 +314,9 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
       };
     }
 
-    const candles: CandlestickData<Time>[] = chartData.candles.map((row) => ({
+    const normalizedCandles = normalizeCandles(chartData.candles, 240);
+
+    const candles: CandlestickData<Time>[] = normalizedCandles.map((row) => ({
       time: toUtcTime(row.timestamp),
       open: row.open,
       high: row.high,
@@ -312,7 +331,7 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
     const bbLower = chartData.overlays.bollinger_lower.map((row) => ({ time: toUtcTime(row.timestamp), value: row.value }));
     const rsi14 = chartData.overlays.rsi14.map((row) => ({ time: toUtcTime(row.timestamp), value: row.value }));
 
-    const volume: HistogramData<Time>[] = chartData.candles.map((row) => ({
+    const volume: HistogramData<Time>[] = normalizedCandles.map((row) => ({
       time: toUtcTime(row.timestamp),
       value: row.volume,
       color: row.close >= row.open ? "#1f7a59" : "#a4302d",
@@ -509,4 +528,3 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
     </section>
   );
 }
-

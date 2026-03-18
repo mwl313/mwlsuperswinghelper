@@ -289,3 +289,46 @@ Out of scope in this phase:
 - strategy engine changes
 - broker execution/account features
 - major UI re-architecture
+
+## 12) Provider Settings Minimum-Change Plan (UI KIS Credentials + Mode Control)
+Scope references:
+- `doc/kospi_swing_signal_spec_beginner_side_hustle.md`
+- `doc/superswinghelper_roadmap_checklist.md`
+
+Goal:
+- In settings tab, allow private users to enter KIS credentials, save server-side, test connection, and switch provider mode (`mock`/`kis`) safely.
+
+Backend plan:
+1. Add server-side system config persistence model (single-row):
+- provider mode
+- KIS app key/secret
+- optional base URL
+2. Add system endpoints:
+- `GET /api/system/provider-status`
+- `POST /api/system/kis-credentials`
+- `PATCH /api/system/provider-mode`
+- `POST /api/system/provider-test`
+3. Extend runtime:
+- load provider mode/credentials from persisted config
+- expose provider health/status (`lastError`, `lastUpdateAt`)
+- safe runtime switch (`stop -> rebuild provider -> start`)
+- reject switching to `kis` when credentials are missing
+- run KIS connection test using server-stored credentials
+4. Never return raw secret in response; return only booleans/safe status.
+
+Frontend plan:
+1. Settings tab cards:
+- Provider status card (mode, configured, health, last error/update)
+- KIS credentials card with strong red warning box
+- Provider controls card (test + switch)
+2. Credential save behavior:
+- send to backend
+- clear secret input after success
+- refresh status
+3. Disable `KIS test` and `Switch to KIS` until configured.
+4. Keep existing strategy settings form and flows unchanged.
+
+Security handling (private-use baseline):
+- no localStorage for credentials
+- no plaintext secret echo from backend
+- server-side persistence only
