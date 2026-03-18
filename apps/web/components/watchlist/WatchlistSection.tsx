@@ -104,7 +104,7 @@ export function WatchlistSection({
                     <div className="text-xs text-[#7a6a51]">{row.symbol}</div>
                   </td>
                   <td className="py-2">{numberFormat(row.price)}</td>
-                  <td className={`py-2 ${row.change_percent && row.change_percent < 0 ? "text-[#a4302d]" : "text-[#1f7a59]"}`}>
+                  <td className={`py-2 ${row.change_percent && row.change_percent < 0 ? "text-[#1f5bd8]" : "text-[#d9363e]"}`}>
                     {row.change_percent !== null ? `${row.change_percent.toFixed(2)}%` : "-"}
                   </td>
                   <td className="py-2">
@@ -124,7 +124,7 @@ export function WatchlistSection({
                       <div>수량: {row.quantity ?? "-"}</div>
                     </div>
                   </td>
-                  <td className={`py-2 ${row.pnl_percent && row.pnl_percent < 0 ? "text-[#a4302d]" : "text-[#1f7a59]"}`}>
+                  <td className={`py-2 ${row.pnl_percent && row.pnl_percent < 0 ? "text-[#1f5bd8]" : "text-[#d9363e]"}`}>
                     {row.pnl_percent !== null ? `${row.pnl_percent.toFixed(2)}%` : "-"}
                   </td>
                   <td className="py-2">{item?.enabled ? "ON" : "OFF"}</td>

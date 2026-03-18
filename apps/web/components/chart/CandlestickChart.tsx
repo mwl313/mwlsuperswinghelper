@@ -127,13 +127,13 @@ export function CandlestickChart({
     });
 
     const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor: "#1f7a59",
-      downColor: "#a4302d",
+      upColor: "#d9363e",
+      downColor: "#1f5bd8",
       borderVisible: true,
-      wickUpColor: "#1f7a59",
-      wickDownColor: "#a4302d",
-      borderUpColor: "#1f7a59",
-      borderDownColor: "#a4302d",
+      wickUpColor: "#d9363e",
+      wickDownColor: "#1f5bd8",
+      borderUpColor: "#d9363e",
+      borderDownColor: "#1f5bd8",
     });
     const ma20Series = chart.addSeries(LineSeries, { color: "#2b6de0", lineWidth: 2, priceLineVisible: false });
     const ma60Series = chart.addSeries(LineSeries, { color: "#6b46c1", lineWidth: 2, priceLineVisible: false });

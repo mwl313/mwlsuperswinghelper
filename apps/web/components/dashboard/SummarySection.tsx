@@ -7,6 +7,8 @@ type SummarySectionProps = {
 };
 
 export function SummarySection({ summary, error, onEnableDesktopAlert }: SummarySectionProps) {
+  const marketStatusText = summary.market_status === "open" ? "장중" : summary.market_status === "closed" ? "장 종료" : summary.market_status;
+
   return (
     <>
       <header className="card pulse mb-6 p-5 md:p-6">
@@ -21,7 +23,7 @@ export function SummarySection({ summary, error, onEnableDesktopAlert }: Summary
       <section className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <div className="card p-4">
           <p className="text-xs text-[#7a6a51]">장 상태</p>
-          <p className="mt-2 text-xl font-bold">{summary.market_status}</p>
+          <p className={`mt-2 text-xl font-bold ${summary.market_status === "open" ? "text-[#c41d3a]" : "text-[#2b59c3]"}`}>{marketStatusText}</p>
         </div>
         <div className="card p-4">
           <p className="text-xs text-[#7a6a51]">오늘 알림 수</p>

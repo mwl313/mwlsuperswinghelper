@@ -434,3 +434,30 @@ Frontend plan:
 3. Prepend older candles, dedupe by timestamp, keep ascending order.
 4. Recompute overlays on merged candles and preserve current live update path.
 5. Keep timeframe selector and websocket behavior unchanged.
+
+## 16) Korean Color Convention + Market Closed Polling Gate Plan
+Scope references:
+- `apps/web/components/chart/CandlestickChart.tsx`
+- `apps/web/components/chart/ChartLegend.tsx`
+- `apps/web/components/chart/ChartSection.tsx`
+- `apps/web/app/page.tsx`
+- `services/api/app/workers/runtime.py`
+
+Goal:
+- Apply Korean market direction colors (`up=red`, `down=blue`) consistently for candle/volume/legend.
+- Distinguish market open/closed and suppress misleading live behavior when closed.
+
+Backend plan:
+1. Add simple regular-session market status helper in runtime (KST weekday 09:00~15:30).
+2. Return `market_status: open|closed` from dashboard summary.
+3. Keep provider/signal logic unchanged.
+
+Frontend plan:
+1. Update candle and volume colors to red(up)/blue(down).
+2. Align legend chips and key direction text colors.
+3. Use backend `market_status` as source of truth.
+4. Gate page-level 5-second polling and WS subscription when market is closed.
+5. In chart status card, show:
+- `장중` (open + ws ready),
+- `재연결 중` (open + ws reconnect),
+- `장 종료` (closed, live paused).

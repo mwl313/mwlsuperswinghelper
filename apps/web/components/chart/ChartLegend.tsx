@@ -42,18 +42,18 @@ export function ChartLegend({ toggles, onToggle }: ChartLegendProps) {
     <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-[#d7e0e8] bg-white p-2">
       <span className="mr-1 text-[11px] font-semibold text-[#5d7186]">표시 항목</span>
       <span className="inline-flex items-center gap-1.5 rounded-full border border-[#d3dbe3] bg-white px-2 py-1 text-[11px] text-[#5d7186]">
-        <span className="h-2.5 w-2.5 rounded-sm bg-[#1f7a59]" />
+        <span className="h-2.5 w-2.5 rounded-sm bg-[#d9363e]" />
         양봉
       </span>
       <span className="inline-flex items-center gap-1.5 rounded-full border border-[#d3dbe3] bg-white px-2 py-1 text-[11px] text-[#5d7186]">
-        <span className="h-2.5 w-2.5 rounded-sm bg-[#a4302d]" />
+        <span className="h-2.5 w-2.5 rounded-sm bg-[#1f5bd8]" />
         음봉
       </span>
 
       <ToggleChip
         label="캔들"
         active={toggles.candles}
-        sampleClassName="h-2.5 w-2.5 rounded-sm bg-[#1f7a59]"
+        sampleClassName="h-2.5 w-2.5 rounded-sm bg-[#d9363e]"
         onClick={() => onToggle("candles", !toggles.candles)}
       />
       <ToggleChip
@@ -83,7 +83,7 @@ export function ChartLegend({ toggles, onToggle }: ChartLegendProps) {
       <ToggleChip
         label="거래량"
         active={toggles.volume}
-        sampleClassName="h-2.5 w-2.5 rounded-sm bg-[#1f7a59]"
+        sampleClassName="h-2.5 w-2.5 rounded-sm bg-[#d9363e]"
         onClick={() => onToggle("volume", !toggles.volume)}
       />
       <ToggleChip
@@ -95,4 +95,3 @@ export function ChartLegend({ toggles, onToggle }: ChartLegendProps) {
     </div>
   );
 }
-

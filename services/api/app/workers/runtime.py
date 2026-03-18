@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from collections import deque
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from typing import Literal
 
 from sqlalchemy import delete, desc, select
@@ -28,6 +28,9 @@ from app.services.system_config import (
 from app.services.ws_manager import WSManager
 
 logger = logging.getLogger(__name__)
+KST = timezone(timedelta(hours=9))
+REGULAR_MARKET_OPEN = time(hour=9, minute=0)
+REGULAR_MARKET_CLOSE = time(hour=15, minute=30)
 
 
 class MarketRuntime:
@@ -417,6 +420,19 @@ class MarketRuntime:
         # Guardrail: treat candles too far in the future as invalid noise.
         return datetime.now(timezone.utc) + timedelta(minutes=2)
 
+    @staticmethod
+    def _regular_market_is_open(now_utc: datetime | None = None) -> bool:
+        current_utc = now_utc or datetime.now(timezone.utc)
+        current_kst = current_utc.astimezone(KST)
+        # MVP rule: regular session only (holiday calendar not included).
+        if current_kst.weekday() >= 5:
+            return False
+        current_time = current_kst.time()
+        return REGULAR_MARKET_OPEN <= current_time < REGULAR_MARKET_CLOSE
+
+    def get_market_status(self) -> Literal["open", "closed"]:
+        return "open" if self._regular_market_is_open() else "closed"
+
     def _purge_persisted_candles(self, symbols: list[str]) -> None:
         if not symbols:
             return
@@ -668,7 +684,7 @@ class MarketRuntime:
                 if signal.signal_strength == "strong"
             }
         )
-        market_status = "mock-open" if self.provider_mode == "mock" else "broker-link"
+        market_status = self.get_market_status()
         return {
             "market_status": market_status,
             "today_signal_count": len(today_signals),

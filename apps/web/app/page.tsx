@@ -113,6 +113,7 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
 
   const currentWatchlist = watchlists[0] ?? null;
+  const isMarketOpen = summary.market_status === "open";
 
   const watchlistItemMap = useMemo(() => {
     const map = new Map<string, WatchlistItem>();
@@ -207,6 +208,16 @@ export default function HomePage() {
     }
   }
 
+  async function refreshSummaryOnly() {
+    try {
+      const summaryData = await getSummary();
+      setSummary(summaryData);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "장 상태 조회 실패");
+    }
+  }
+
   async function refreshSignalsAndLive() {
     try {
       const [signalsData, liveData] = await Promise.all([getSignals(120), getLiveWatchlist()]);
@@ -243,14 +254,18 @@ export default function HomePage() {
 
   useEffect(() => {
     const timer = setInterval(() => {
-      void refreshStatic();
-      void refreshLive();
-      if (activeTab === "settings") {
-        void refreshProviderStatus(false);
+      if (isMarketOpen) {
+        void refreshStatic();
+        void refreshLive();
+        if (activeTab === "settings") {
+          void refreshProviderStatus(false);
+        }
+        return;
       }
-    }, 5000);
+      void refreshSummaryOnly();
+    }, isMarketOpen ? 5000 : 600000);
     return () => clearInterval(timer);
-  }, [activeTab]);
+  }, [activeTab, isMarketOpen]);
 
   useEffect(() => {
     if (activeTab === "settings") {
@@ -334,6 +349,9 @@ export default function HomePage() {
   }, [newSymbol]);
 
   useEffect(() => {
+    if (!isMarketOpen) {
+      return;
+    }
     const ws = new WebSocket(WS_URL);
 
     ws.onmessage = (event) => {
@@ -382,7 +400,7 @@ export default function HomePage() {
     };
 
     return () => ws.close();
-  }, [settings?.enable_desktop_notifications]);
+  }, [settings?.enable_desktop_notifications, isMarketOpen]);
 
   function onChangeSymbolInput(value: string) {
     setNewSymbol(value);
@@ -670,6 +688,7 @@ export default function HomePage() {
           symbols={chartSymbols}
           selectedSymbol={selectedChartSymbol}
           onSelectSymbol={setSelectedChartSymbol}
+          marketStatus={summary.market_status}
           liveQuote={selectedChartSymbol ? (liveRowMap.get(selectedChartSymbol) ?? null) : null}
           recentSignal={selectedChartSymbol ? (latestSignalMap.get(selectedChartSymbol) ?? null) : null}
           onOpenPositionEditor={onOpenPositionEditor}

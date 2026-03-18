@@ -19,6 +19,7 @@ type ChartSectionProps = {
   symbols: ChartSymbolOption[];
   selectedSymbol: string | null;
   onSelectSymbol: (symbol: string) => void;
+  marketStatus: string;
   liveQuote: LiveWatchlistItem | null;
   recentSignal: SignalLog | null;
   onOpenPositionEditor: (symbol: string) => void;
@@ -226,7 +227,7 @@ function mergeCandles(current: ChartCandle[], incoming: ChartCandle, eventType: 
   return current;
 }
 
-export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuote, recentSignal, onOpenPositionEditor }: ChartSectionProps) {
+export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, marketStatus, liveQuote, recentSignal, onOpenPositionEditor }: ChartSectionProps) {
   const [timeframe, setTimeframe] = useState<ChartTimeframe>("1m");
   const [chartData, setChartData] = useState<ChartResponse | null>(null);
   const [showCandles, setShowCandles] = useState(true);
@@ -241,6 +242,7 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const [hasMoreHistory, setHasMoreHistory] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const isMarketOpen = marketStatus === "open";
 
   const selectedMeta = useMemo(() => symbols.find((row) => row.symbol === selectedSymbol) ?? null, [symbols, selectedSymbol]);
 
@@ -301,7 +303,7 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
   }, [selectedSymbol, timeframe, loadChart]);
 
   useEffect(() => {
-    if (!selectedSymbol) {
+    if (!selectedSymbol || !isMarketOpen) {
       setWsConnected(false);
       return;
     }
@@ -352,7 +354,7 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
       setWsConnected(false);
       ws.close();
     };
-  }, [selectedSymbol, timeframe, loadChart]);
+  }, [selectedSymbol, timeframe, loadChart, isMarketOpen]);
 
   const chartSeries = useMemo(() => {
     if (!chartData) {
@@ -389,7 +391,7 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
     const volume: HistogramData<Time>[] = normalizedCandles.map((row) => ({
       time: toUtcTime(row.timestamp),
       value: row.volume,
-      color: row.close >= row.open ? "#1f7a59" : "#a4302d",
+      color: row.close >= row.open ? "#d9363e" : "#1f5bd8",
     }));
 
     const markers: SeriesMarker<Time>[] = chartData.markers.map((row) => ({
@@ -446,7 +448,7 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
           </div>
           <div className="rounded-lg border border-[#d7e0e8] bg-[#f9fbff] px-3 py-2">
             <p className="text-[11px] text-[#6a8094]">변동률</p>
-            <p className={`mt-1 text-base font-semibold ${(liveQuote?.change_percent ?? 0) < 0 ? "text-[#b42318]" : "text-[#027a48]"}`}>
+            <p className={`mt-1 text-base font-semibold ${(liveQuote?.change_percent ?? 0) < 0 ? "text-[#1f5bd8]" : "text-[#d9363e]"}`}>
               {liveQuote?.change_percent !== null && liveQuote?.change_percent !== undefined ? `${liveQuote.change_percent.toFixed(2)}%` : "-"}
             </p>
           </div>
@@ -458,7 +460,13 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
           </div>
           <div className="rounded-lg border border-[#d7e0e8] bg-[#f9fbff] px-3 py-2">
             <p className="text-[11px] text-[#6a8094]">실시간 상태</p>
-            <p className={`mt-1 text-sm font-semibold ${wsConnected ? "text-[#027a48]" : "text-[#b42318]"}`}>{wsConnected ? "연결됨" : "재연결 중"}</p>
+            <p
+              className={`mt-1 text-sm font-semibold ${
+                !isMarketOpen ? "text-[#6a8094]" : wsConnected ? "text-[#d9363e]" : "text-[#1f5bd8]"
+              }`}
+            >
+              {!isMarketOpen ? "장 종료" : wsConnected ? "장중" : "재연결 중"}
+            </p>
           </div>
         </div>
 
@@ -475,7 +483,7 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
             <span>수량: {liveQuote?.quantity ? numberFormat(liveQuote.quantity, 0) : "-"}</span>
             <span>손절: {liveQuote?.stop_loss_price ? `${numberFormat(liveQuote.stop_loss_price, 0)}원` : "-"}</span>
             <span>익절: {liveQuote?.take_profit_price ? `${numberFormat(liveQuote.take_profit_price, 0)}원` : "-"}</span>
-            <span className={(liveQuote?.pnl_percent ?? 0) < 0 ? "text-[#b42318]" : "text-[#027a48]"}>
+            <span className={(liveQuote?.pnl_percent ?? 0) < 0 ? "text-[#1f5bd8]" : "text-[#d9363e]"}>
               손익률: {liveQuote?.pnl_percent !== null && liveQuote?.pnl_percent !== undefined ? `${liveQuote.pnl_percent.toFixed(2)}%` : "-"}
             </span>
           </div>
@@ -532,7 +540,9 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
               {isLoadingOlder ? "불러오는 중..." : hasMoreHistory ? "이전 데이터 더 보기" : "이전 데이터 없음"}
             </button>
             <p className="text-[11px] text-[#61768a]">
-              {timeframe === "1m"
+              {!isMarketOpen
+                ? "장 종료 상태라 자동 갱신이 일시 중지됩니다. 필요 시 수동 새로고침을 사용하세요."
+                : timeframe === "1m"
                 ? "1분봉은 실시간으로 즉시 반영됩니다."
                 : `${timeframeLabel[timeframe]}은 봉 마감 이벤트 기준으로 새로고침 반영됩니다.`}
             </p>
