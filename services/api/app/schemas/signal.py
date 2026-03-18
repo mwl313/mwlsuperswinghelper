@@ -32,3 +32,14 @@ class LiveSignalEvent(BaseModel):
     volume: float
     reason_text: str
     created_at: datetime
+
+
+class SignalBulkDeleteResult(BaseModel):
+    deletedCount: int
+    scope: Literal["all", "symbol"]
+    symbol: str | None = None
+
+
+class SignalDeleteOneResult(BaseModel):
+    deleted: bool
+    id: int

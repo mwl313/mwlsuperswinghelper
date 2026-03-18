@@ -9,6 +9,8 @@ import {
   ProviderConnectionTestResult,
   ProviderMode,
   ProviderStatus,
+  SignalBulkDeleteResult,
+  SignalDeleteOneResult,
   SignalLog,
   StrategySettings,
   SymbolResolveResult,
@@ -86,6 +88,15 @@ export function deleteWatchlistItem(watchlistId: number, itemId: number) {
 
 export function getSignals(limit = 100) {
   return request<SignalLog[]>(`/signals?limit=${limit}`);
+}
+
+export function deleteSignals(symbol?: string) {
+  const query = symbol ? `?symbol=${encodeURIComponent(symbol)}` : "";
+  return request<SignalBulkDeleteResult>(`/signals${query}`, { method: "DELETE" });
+}
+
+export function deleteSignal(id: number) {
+  return request<SignalDeleteOneResult>(`/signals/${id}`, { method: "DELETE" });
 }
 
 export function getSettings() {

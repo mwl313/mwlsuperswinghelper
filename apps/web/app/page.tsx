@@ -5,12 +5,16 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { ChartSection } from "@/components/chart/ChartSection";
 import { SummarySection } from "@/components/dashboard/SummarySection";
 import { AppTabKey, AppTabs } from "@/components/layout/AppTabs";
+import { PositionEditorModal } from "@/components/position/PositionEditorModal";
 import { SettingsSection, type EditableStrategySettings, type KisCredentialFormState } from "@/components/settings/SettingsSection";
 import { SignalsSection } from "@/components/signals/SignalsSection";
 import { WatchlistSection } from "@/components/watchlist/WatchlistSection";
 import {
   WS_URL,
   addWatchlistItem,
+  closePosition,
+  deleteSignal,
+  deleteSignals,
   deleteWatchlistItem,
   getProviderStatus,
   getLiveWatchlist,
@@ -22,6 +26,7 @@ import {
   saveKisCredentials,
   switchProviderMode,
   testProviderConnection,
+  updatePosition,
   updateSettings,
   updateWatchlistItem,
 } from "@/lib/api";
@@ -31,11 +36,13 @@ import {
   LiveWatchlistItem,
   ProviderMode,
   ProviderStatus,
+  PositionUpsertPayload,
   SignalLog,
   SignalType,
   StrategySettings,
   Watchlist,
   WatchlistItem,
+  HoldingState,
 } from "@/lib/types";
 
 const signalTypeText: Record<SignalType, string> = {
@@ -87,9 +94,18 @@ export default function HomePage() {
   const [providerMessage, setProviderMessage] = useState<string | null>(null);
   const [kisForm, setKisForm] = useState<KisCredentialFormState>(EMPTY_KIS_FORM);
   const [newSymbol, setNewSymbol] = useState("");
+  const [newHoldingState, setNewHoldingState] = useState<HoldingState | "">("");
+  const [newEntryPrice, setNewEntryPrice] = useState("");
+  const [newQuantity, setNewQuantity] = useState("");
+  const [newStopLossPrice, setNewStopLossPrice] = useState("");
+  const [newTakeProfitPrice, setNewTakeProfitPrice] = useState("");
+  const [newNote, setNewNote] = useState("");
   const [resolvedSymbolName, setResolvedSymbolName] = useState<string | null>(null);
   const [isResolvingSymbol, setIsResolvingSymbol] = useState(false);
   const [symbolLookupMessage, setSymbolLookupMessage] = useState("6자리 종목코드를 입력하세요.");
+  const [editingPositionSymbol, setEditingPositionSymbol] = useState<string | null>(null);
+  const [positionModalSaving, setPositionModalSaving] = useState(false);
+  const [signalDeleting, setSignalDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const currentWatchlist = watchlists[0] ?? null;
@@ -124,6 +140,27 @@ export default function HomePage() {
     }
     return map;
   }, [signals]);
+
+  const isHoldingAdd = newHoldingState === "holding";
+  const canSubmitAdd = useMemo(() => {
+    if (newSymbol.length !== 6 || !resolvedSymbolName || isResolvingSymbol) {
+      return false;
+    }
+    if (!newHoldingState) {
+      return false;
+    }
+    if (isHoldingAdd) {
+      const entry = Number(newEntryPrice);
+      const qty = Number(newQuantity);
+      return Number.isFinite(entry) && entry > 0 && Number.isInteger(qty) && qty >= 1;
+    }
+    return true;
+  }, [newSymbol, resolvedSymbolName, isResolvingSymbol, newHoldingState, isHoldingAdd, newEntryPrice, newQuantity]);
+
+  const editingPositionLiveRow = useMemo(() => {
+    if (!editingPositionSymbol) return null;
+    return liveRowMap.get(editingPositionSymbol) ?? null;
+  }, [editingPositionSymbol, liveRowMap]);
 
   useEffect(() => {
     if (chartSymbols.length === 0) {
@@ -163,6 +200,17 @@ export default function HomePage() {
       setFormSettings(asEditableSettings(data));
     } catch (e) {
       setError(e instanceof Error ? e.message : "설정 로드 실패");
+    }
+  }
+
+  async function refreshSignalsAndLive() {
+    try {
+      const [signalsData, liveData] = await Promise.all([getSignals(120), getLiveWatchlist()]);
+      setSignals(signalsData);
+      setLiveRows(liveData);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "시그널/실시간 데이터 로드 실패");
     }
   }
 
@@ -275,7 +323,18 @@ export default function HomePage() {
             if (idx >= 0) {
               next[idx] = { ...next[idx], ...incoming };
             } else {
-              next.push(incoming);
+              next.push({
+                ...incoming,
+                holding_state: incoming.holding_state ?? "not_holding",
+                status: incoming.status ?? null,
+                entry_price: incoming.entry_price ?? null,
+                quantity: incoming.quantity ?? null,
+                stop_loss_price: incoming.stop_loss_price ?? null,
+                take_profit_price: incoming.take_profit_price ?? null,
+                note: incoming.note ?? null,
+                pnl_percent: incoming.pnl_percent ?? null,
+                pnl_amount: incoming.pnl_amount ?? null,
+              });
             }
             return next;
           });
@@ -291,19 +350,47 @@ export default function HomePage() {
   async function onAddSymbol(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!currentWatchlist) return;
-    if (newSymbol.length !== 6) {
-      setError("6자리 종목코드를 입력해주세요.");
+    if (!newHoldingState) {
+      setError("보유여부를 선택해주세요.");
       return;
     }
+    if (!canSubmitAdd) {
+      setError("입력값을 확인해주세요. 보유중일 때는 진입가와 정수 수량이 필수입니다.");
+      return;
+    }
+
+    const payload: {
+      symbol: string;
+      enabled: boolean;
+      holding_state: HoldingState;
+      entry_price?: number | null;
+      quantity?: number | null;
+      stop_loss_price?: number | null;
+      take_profit_price?: number | null;
+      note?: string | null;
+    } = {
+      symbol: newSymbol.trim(),
+      enabled: true,
+      holding_state: newHoldingState,
+    };
+
+    if (newEntryPrice.trim()) payload.entry_price = Number(newEntryPrice);
+    if (newQuantity.trim()) payload.quantity = Number(newQuantity);
+    if (newStopLossPrice.trim()) payload.stop_loss_price = Number(newStopLossPrice);
+    if (newTakeProfitPrice.trim()) payload.take_profit_price = Number(newTakeProfitPrice);
+    if (newNote.trim()) payload.note = newNote.trim();
+
     try {
-      await addWatchlistItem(currentWatchlist.id, {
-        symbol: newSymbol.trim(),
-        enabled: true,
-        holding_state: "not_holding",
-      });
+      await addWatchlistItem(currentWatchlist.id, payload);
       await refreshStatic();
       await refreshLive();
       setNewSymbol("");
+      setNewHoldingState("");
+      setNewEntryPrice("");
+      setNewQuantity("");
+      setNewStopLossPrice("");
+      setNewTakeProfitPrice("");
+      setNewNote("");
       setResolvedSymbolName(null);
       setSymbolLookupMessage("6자리 종목코드를 입력하세요.");
     } catch (e) {
@@ -399,9 +486,82 @@ export default function HomePage() {
     }
   }
 
+  function onOpenPositionEditor(symbol: string) {
+    setEditingPositionSymbol(symbol);
+  }
+
+  async function onSavePositionFromModal(payload: PositionUpsertPayload) {
+    if (!editingPositionSymbol) return;
+    setPositionModalSaving(true);
+    try {
+      await updatePosition(editingPositionSymbol, payload);
+      await refreshLive();
+      await refreshStatic();
+      setEditingPositionSymbol(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "포지션 저장 실패");
+    } finally {
+      setPositionModalSaving(false);
+    }
+  }
+
+  async function onClosePositionFromModal() {
+    if (!editingPositionSymbol) return;
+    setPositionModalSaving(true);
+    try {
+      await closePosition(editingPositionSymbol);
+      await refreshLive();
+      await refreshStatic();
+      setEditingPositionSymbol(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "포지션 종료 실패");
+    } finally {
+      setPositionModalSaving(false);
+    }
+  }
+
   function onOpenChart(symbol: string) {
     setSelectedChartSymbol(symbol);
     setActiveTab("chart");
+  }
+
+  async function onDeleteAllSignals() {
+    setSignalDeleting(true);
+    try {
+      await deleteSignals();
+      await refreshSignalsAndLive();
+      await refreshStatic();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "시그널 전체 삭제 실패");
+    } finally {
+      setSignalDeleting(false);
+    }
+  }
+
+  async function onDeleteSignalsBySymbol(symbol: string) {
+    setSignalDeleting(true);
+    try {
+      await deleteSignals(symbol);
+      await refreshSignalsAndLive();
+      await refreshStatic();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "종목 시그널 삭제 실패");
+    } finally {
+      setSignalDeleting(false);
+    }
+  }
+
+  async function onDeleteSignal(signalId: number) {
+    setSignalDeleting(true);
+    try {
+      await deleteSignal(signalId);
+      await refreshSignalsAndLive();
+      await refreshStatic();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "시그널 삭제 실패");
+    } finally {
+      setSignalDeleting(false);
+    }
   }
 
   return (
@@ -418,14 +578,28 @@ export default function HomePage() {
           liveRows={liveRows}
           watchlistItemMap={watchlistItemMap}
           newSymbol={newSymbol}
+          newHoldingState={newHoldingState}
+          newEntryPrice={newEntryPrice}
+          newQuantity={newQuantity}
+          newStopLossPrice={newStopLossPrice}
+          newTakeProfitPrice={newTakeProfitPrice}
+          newNote={newNote}
           resolvedSymbolName={resolvedSymbolName}
           isResolvingSymbol={isResolvingSymbol}
           symbolLookupMessage={symbolLookupMessage}
+          canSubmitAdd={canSubmitAdd}
           onSymbolChange={setNewSymbol}
+          onHoldingStateChange={setNewHoldingState}
+          onEntryPriceChange={setNewEntryPrice}
+          onQuantityChange={setNewQuantity}
+          onStopLossPriceChange={setNewStopLossPrice}
+          onTakeProfitPriceChange={setNewTakeProfitPrice}
+          onNoteChange={setNewNote}
           onAddSymbol={onAddSymbol}
           onToggleItem={onToggleItem}
           onDeleteItem={onDeleteItem}
           onOpenChart={onOpenChart}
+          onOpenPositionEditor={onOpenPositionEditor}
         />
       ) : null}
 
@@ -436,12 +610,18 @@ export default function HomePage() {
           onSelectSymbol={setSelectedChartSymbol}
           liveQuote={selectedChartSymbol ? (liveRowMap.get(selectedChartSymbol) ?? null) : null}
           recentSignal={selectedChartSymbol ? (latestSignalMap.get(selectedChartSymbol) ?? null) : null}
-          onOpenPositionEditor={() => {
-            setActiveTab("watchlist");
-          }}
+          onOpenPositionEditor={onOpenPositionEditor}
         />
       ) : null}
-      {activeTab === "signals" ? <SignalsSection signals={signals} /> : null}
+      {activeTab === "signals" ? (
+        <SignalsSection
+          signals={signals}
+          isDeleting={signalDeleting}
+          onDeleteAll={onDeleteAllSignals}
+          onDeleteBySymbol={onDeleteSignalsBySymbol}
+          onDeleteOne={onDeleteSignal}
+        />
+      ) : null}
       {activeTab === "settings" ? (
         <SettingsSection
           formSettings={formSettings}
@@ -458,6 +638,16 @@ export default function HomePage() {
           onTestProviderConnection={onTestProviderConnection}
         />
       ) : null}
+      <PositionEditorModal
+        isOpen={editingPositionSymbol !== null}
+        symbol={editingPositionSymbol}
+        symbolName={editingPositionLiveRow?.symbol_name ?? null}
+        initial={editingPositionLiveRow}
+        isSaving={positionModalSaving}
+        onClose={() => setEditingPositionSymbol(null)}
+        onSubmit={onSavePositionFromModal}
+        onClosePosition={onClosePositionFromModal}
+      />
     </main>
   );
 }

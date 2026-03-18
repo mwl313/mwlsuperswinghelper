@@ -37,6 +37,7 @@ export type LiveWatchlistItem = {
   last_signal_strength: SignalStrength | null;
   last_signal_reason: string | null;
   holding_state: HoldingState;
+  status: "open" | "closed" | null;
   entry_price: number | null;
   quantity: number | null;
   stop_loss_price: number | null;
@@ -57,6 +58,17 @@ export type SignalLog = {
   reason_text: string;
   raw_payload_json: Record<string, unknown>;
   created_at: string;
+};
+
+export type SignalBulkDeleteResult = {
+  deletedCount: number;
+  scope: "all" | "symbol";
+  symbol: string | null;
+};
+
+export type SignalDeleteOneResult = {
+  deleted: boolean;
+  id: number;
 };
 
 export type StrategySettings = {
