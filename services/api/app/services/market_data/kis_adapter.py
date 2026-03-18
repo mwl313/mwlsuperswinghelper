@@ -208,13 +208,20 @@ class KoreaInvestmentAdapter(MarketDataProvider):
             ticks.append(tick)
         return ticks
 
-    async def get_recent_candles(self, symbol: str, limit: int) -> list[MarketCandle]:
+    async def get_recent_candles(self, symbol: str, limit: int, before: datetime | None = None) -> list[MarketCandle]:
         if limit <= 0 or not self._configured():
             return []
 
         headers = await self._auth_headers(self.intraday_tr_id)
         if headers is None:
             return []
+
+        before_utc = None
+        before_kst = None
+        if before is not None:
+            before_utc = before if before.tzinfo else before.replace(tzinfo=timezone.utc)
+            before_utc = before_utc.astimezone(timezone.utc)
+            before_kst = before_utc.astimezone(KST)
 
         try:
             payload = await self._request_json(
@@ -225,7 +232,7 @@ class KoreaInvestmentAdapter(MarketDataProvider):
                     "fid_etc_cls_code": "",
                     "fid_cond_mrkt_div_code": self.market_div_code,
                     "fid_input_iscd": symbol,
-                    "fid_input_hour_1": "",
+                    "fid_input_hour_1": before_kst.strftime("%H%M%S") if before_kst else "",
                     "fid_pw_data_incu_yn": "Y",
                 },
             )
@@ -274,6 +281,9 @@ class KoreaInvestmentAdapter(MarketDataProvider):
                     volume=volume,
                 )
             )
+
+        if before_utc is not None:
+            candles = [row for row in candles if row.timestamp < before_utc]
 
         # API rows are commonly descending; normalize to ascending and dedupe by timestamp.
         indexed: dict[datetime, MarketCandle] = {}

@@ -50,6 +50,6 @@ class MockMarketDataProvider(MarketDataProvider):
 
         return ticks
 
-    async def get_recent_candles(self, symbol: str, limit: int) -> list[MarketCandle]:
+    async def get_recent_candles(self, symbol: str, limit: int, before: datetime | None = None) -> list[MarketCandle]:
         # Mock mode keeps startup simple; runtime builds candles from streamed ticks.
         return []

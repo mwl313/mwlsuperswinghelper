@@ -25,6 +25,9 @@ type ChartSectionProps = {
 };
 
 type ChartTimeframe = "1m" | "5m" | "15m" | "1h";
+const CHART_PAGE_LIMIT = 240;
+const CHART_MAX_CANDLES = 2000;
+const CHART_MAX_MARKERS = 2000;
 
 const signalTypeText: Record<SignalType, string> = {
   buy_candidate: "매수 후보",
@@ -67,7 +70,7 @@ function toMs(timestamp: string): number {
   return Number.isNaN(ms) ? 0 : ms;
 }
 
-function normalizeCandles(candles: ChartCandle[], maxLength = 240): ChartCandle[] {
+function normalizeCandles(candles: ChartCandle[], maxLength = CHART_MAX_CANDLES): ChartCandle[] {
   const indexed = new Map<number, ChartCandle>();
   for (const candle of candles) {
     const ms = toMs(candle.timestamp);
@@ -81,6 +84,23 @@ function normalizeCandles(candles: ChartCandle[], maxLength = 240): ChartCandle[
     return ordered;
   }
   return ordered.slice(-maxLength);
+}
+
+function mergeMarkers(current: ChartResponse["markers"], incoming: ChartResponse["markers"]): ChartResponse["markers"] {
+  const indexed = new Map<string, ChartResponse["markers"][number]>();
+  const push = (rows: ChartResponse["markers"]) => {
+    for (const row of rows) {
+      const key = `${row.timestamp}-${row.type}-${row.strength}-${row.description}`;
+      indexed.set(key, row);
+    }
+  };
+  push(incoming);
+  push(current);
+  const ordered = [...indexed.values()].sort((a, b) => toMs(a.timestamp) - toMs(b.timestamp));
+  if (ordered.length <= CHART_MAX_MARKERS) {
+    return ordered;
+  }
+  return ordered.slice(-CHART_MAX_MARKERS);
 }
 
 function numberFormat(value: number | null | undefined, digits = 2): string {
@@ -174,7 +194,7 @@ function isCandleWsEvent(value: unknown): value is CandleWsEvent {
   return (event.type === "candle_update" || event.type === "candle_closed") && typeof event.symbol === "string" && !!event.candle;
 }
 
-function mergeCandles(current: ChartCandle[], incoming: ChartCandle, eventType: CandleWsEvent["type"], maxLength = 240): ChartCandle[] {
+function mergeCandles(current: ChartCandle[], incoming: ChartCandle, eventType: CandleWsEvent["type"], maxLength = CHART_MAX_CANDLES): ChartCandle[] {
   const incomingTs = toMs(incoming.timestamp);
   if (!incomingTs) return current;
 
@@ -218,6 +238,8 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
   const [showVolume, setShowVolume] = useState(true);
   const [wsConnected, setWsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingOlder, setIsLoadingOlder] = useState(false);
+  const [hasMoreHistory, setHasMoreHistory] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const selectedMeta = useMemo(() => symbols.find((row) => row.symbol === selectedSymbol) ?? null, [symbols, selectedSymbol]);
@@ -226,9 +248,10 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
     if (!selectedSymbol) return;
     setIsLoading(true);
     try {
-      const data = await getChart(selectedSymbol, 240, timeframe);
-      const normalizedCandles = normalizeCandles(data.candles, 240);
+      const data = await getChart(selectedSymbol, CHART_PAGE_LIMIT, timeframe);
+      const normalizedCandles = normalizeCandles(data.candles, CHART_MAX_CANDLES);
       setChartData({ ...data, candles: normalizedCandles, overlays: recalcOverlays(normalizedCandles) });
+      setHasMoreHistory(data.candles.length >= CHART_PAGE_LIMIT);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "차트 데이터 조회 실패");
@@ -236,6 +259,38 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
       setIsLoading(false);
     }
   }, [selectedSymbol, timeframe]);
+
+  const loadOlderHistory = useCallback(async () => {
+    if (!selectedSymbol || !chartData || chartData.candles.length === 0) return;
+    const oldestTimestamp = chartData.candles[0].timestamp;
+    setIsLoadingOlder(true);
+    try {
+      const older = await getChart(selectedSymbol, CHART_PAGE_LIMIT, timeframe, oldestTimestamp);
+      const olderCandles = normalizeCandles(older.candles, CHART_MAX_CANDLES);
+      setHasMoreHistory(olderCandles.length >= CHART_PAGE_LIMIT);
+      if (olderCandles.length === 0) {
+        return;
+      }
+
+      setChartData((prev) => {
+        if (!prev || prev.symbol !== selectedSymbol || prev.timeframe !== timeframe) {
+          return prev;
+        }
+        const mergedCandles = normalizeCandles([...olderCandles, ...prev.candles], CHART_MAX_CANDLES);
+        return {
+          ...prev,
+          candles: mergedCandles,
+          overlays: recalcOverlays(mergedCandles),
+          markers: mergeMarkers(prev.markers, older.markers),
+        };
+      });
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "이전 데이터 조회 실패");
+    } finally {
+      setIsLoadingOlder(false);
+    }
+  }, [selectedSymbol, timeframe, chartData]);
 
   useEffect(() => {
     if (!selectedSymbol) {
@@ -274,7 +329,7 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
         if (timeframe === "1m") {
           setChartData((prev) => {
             if (!prev || prev.symbol !== selectedSymbol) return prev;
-            const nextCandles = mergeCandles(prev.candles, payload.candle, payload.type, 240);
+            const nextCandles = mergeCandles(prev.candles, payload.candle, payload.type, CHART_MAX_CANDLES);
             if (nextCandles === prev.candles) return prev;
             return {
               ...prev,
@@ -314,7 +369,7 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
       };
     }
 
-    const normalizedCandles = normalizeCandles(chartData.candles, 240);
+    const normalizedCandles = normalizeCandles(chartData.candles, CHART_MAX_CANDLES);
 
     const candles: CandlestickData<Time>[] = normalizedCandles.map((row) => ({
       time: toUtcTime(row.timestamp),
@@ -417,7 +472,7 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
           <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[#4e6376]">
             <span>상태: {liveQuote?.holding_state === "holding" ? "보유중" : "미보유"}</span>
             <span>진입가: {liveQuote?.entry_price ? `${numberFormat(liveQuote.entry_price, 0)}원` : "-"}</span>
-            <span>수량: {liveQuote?.quantity ? numberFormat(liveQuote.quantity, 4) : "-"}</span>
+            <span>수량: {liveQuote?.quantity ? numberFormat(liveQuote.quantity, 0) : "-"}</span>
             <span>손절: {liveQuote?.stop_loss_price ? `${numberFormat(liveQuote.stop_loss_price, 0)}원` : "-"}</span>
             <span>익절: {liveQuote?.take_profit_price ? `${numberFormat(liveQuote.take_profit_price, 0)}원` : "-"}</span>
             <span className={(liveQuote?.pnl_percent ?? 0) < 0 ? "text-[#b42318]" : "text-[#027a48]"}>
@@ -465,11 +520,23 @@ export function ChartSection({ symbols, selectedSymbol, onSelectSymbol, liveQuot
       <div className="card p-3 md:p-4">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm font-semibold text-[#243d51]">가격 차트 ({timeframeLabel[timeframe]})</p>
-          <p className="text-[11px] text-[#61768a]">
-            {timeframe === "1m"
-              ? "1분봉은 실시간으로 즉시 반영됩니다."
-              : `${timeframeLabel[timeframe]}은 봉 마감 이벤트 기준으로 새로고침 반영됩니다.`}
-          </p>
+          <div className="flex items-center gap-2">
+            <button
+              className="rounded-md border border-[#d3dbe3] bg-white px-3 py-1.5 text-xs font-semibold text-[#324b5f] disabled:cursor-not-allowed disabled:opacity-60"
+              type="button"
+              onClick={() => {
+                void loadOlderHistory();
+              }}
+              disabled={isLoading || isLoadingOlder || !hasMoreHistory || chartSeries.candles.length === 0}
+            >
+              {isLoadingOlder ? "불러오는 중..." : hasMoreHistory ? "이전 데이터 더 보기" : "이전 데이터 없음"}
+            </button>
+            <p className="text-[11px] text-[#61768a]">
+              {timeframe === "1m"
+                ? "1분봉은 실시간으로 즉시 반영됩니다."
+                : `${timeframeLabel[timeframe]}은 봉 마감 이벤트 기준으로 새로고침 반영됩니다.`}
+            </p>
+          </div>
         </div>
         <div className="rounded-xl border border-[#d7e0e8] bg-white p-2">
           <CandlestickChart

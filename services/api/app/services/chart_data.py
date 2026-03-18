@@ -124,14 +124,20 @@ def _dedupe_sort_candles(candles: list[Candle]) -> list[Candle]:
     return sorted(indexed.values(), key=lambda row: row.timestamp)
 
 
-def _load_persisted_closed_candles(symbol: str, limit: int, db: Session) -> list[Candle]:
+def _load_persisted_closed_candles(
+    symbol: str,
+    limit: int,
+    db: Session,
+    before: datetime | None = None,
+) -> list[Candle]:
     upper_bound = datetime.now(timezone.utc) + timedelta(minutes=2)
+    before_utc = _normalize_ts(before) if before else None
     query = (
         select(CandleHistory)
         .where(
             CandleHistory.symbol == symbol,
             CandleHistory.timeframe == _BASE_TIMEFRAME,
-            CandleHistory.timestamp <= upper_bound,
+            CandleHistory.timestamp <= upper_bound if before_utc is None else CandleHistory.timestamp < before_utc,
         )
         .order_by(desc(CandleHistory.timestamp))
         .limit(limit)
@@ -199,13 +205,14 @@ def get_chart_response(
     timeframe: ChartTimeframe,
     runtime: MarketRuntime,
     db: Session,
+    before: datetime | None = None,
 ) -> ChartResponse:
     fetch_limit = limit * _TIMEFRAME_TO_MINUTES[timeframe] + _TIMEFRAME_TO_MINUTES[timeframe]
-    persisted = _load_persisted_closed_candles(symbol=symbol, limit=fetch_limit, db=db)
+    persisted = _load_persisted_closed_candles(symbol=symbol, limit=fetch_limit, db=db, before=before)
     current = runtime.aggregator.get_current_candle(symbol=symbol)
 
     merged_candles_1m = persisted.copy()
-    if current is not None:
+    if current is not None and before is None:
         merged_candles_1m.append(current)
 
     merged_candles = _aggregate_candles(merged_candles_1m, timeframe=timeframe)
@@ -225,10 +232,13 @@ def get_chart_response(
     ]
 
     candle_start_ts: datetime | None = merged_candles[0].timestamp if merged_candles else None
-    signal_query = select(SignalLog).where(SignalLog.symbol == symbol)
+    candle_end_ts: datetime | None = merged_candles[-1].timestamp if merged_candles else None
+    signal_query = select(SignalLog).where(SignalLog.symbol == symbol, SignalLog.user_id == 1)
     if candle_start_ts is not None:
         signal_query = signal_query.where(SignalLog.created_at >= candle_start_ts)
-    signal_query = signal_query.order_by(desc(SignalLog.created_at)).limit(limit)
+    if candle_end_ts is not None:
+        signal_query = signal_query.where(SignalLog.created_at <= candle_end_ts)
+    signal_query = signal_query.order_by(desc(SignalLog.created_at)).limit(max(200, limit * 3))
     signal_rows = list(db.scalars(signal_query).all())
 
     return ChartResponse(

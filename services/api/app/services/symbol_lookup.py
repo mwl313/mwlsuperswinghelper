@@ -45,6 +45,12 @@ _FALLBACK_SYMBOLS: Final[dict[str, str]] = {
     "373220": "LG에너지솔루션",
 }
 
+_SOURCE_PRIORITY: Final[dict[str, int]] = {
+    "file_map": 0,
+    "watchlist_db": 1,
+    "fallback_map": 2,
+}
+
 
 def _normalize_symbol(symbol: str) -> str:
     return re.sub(r"\D", "", symbol).strip()
@@ -66,7 +72,7 @@ def _resolve_from_watchlist_db(symbol: str, db: Session) -> str | None:
 
 
 @lru_cache(maxsize=1)
-def _load_file_symbol_map() -> dict[str, str]:
+def _load_file_symbol_details() -> dict[str, dict[str, str | None]]:
     file_path = Path(__file__).resolve().parents[1] / "data" / "krx_symbol_map.json"
     if not file_path.exists():
         return {}
@@ -80,15 +86,23 @@ def _load_file_symbol_map() -> dict[str, str]:
     if not isinstance(symbols, dict):
         return {}
 
-    result: dict[str, str] = {}
+    result: dict[str, dict[str, str | None]] = {}
     for code, row in symbols.items():
         if not isinstance(code, str) or len(code) != 6 or not code.isdigit():
             continue
         if isinstance(row, dict):
             name = row.get("name")
             if isinstance(name, str) and name.strip():
-                result[code] = name.strip()
+                market = row.get("market")
+                result[code] = {
+                    "name": name.strip(),
+                    "market": market.strip() if isinstance(market, str) and market.strip() else None,
+                }
     return result
+
+
+def _load_file_symbol_map() -> dict[str, str]:
+    return {code: row["name"] for code, row in _load_file_symbol_details().items() if isinstance(row.get("name"), str)}
 
 
 def _resolve_from_naver(symbol: str) -> str | None:
@@ -136,3 +150,85 @@ def resolve_symbol_name(symbol: str, db: Session | None = None) -> tuple[str | N
         return online_name, "naver"
 
     return None, "not_found"
+
+
+def search_symbols(query: str, db: Session | None = None, limit: int = 15) -> list[dict[str, str | None]]:
+    cleaned = query.strip()
+    if not cleaned:
+        return []
+
+    normalized_digits = _normalize_symbol(cleaned)
+    normalized_name = cleaned.casefold()
+
+    candidates: dict[str, dict[str, str | None]] = {}
+
+    file_details = _load_file_symbol_details()
+    for symbol, row in file_details.items():
+        name = row.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        candidates[symbol] = {
+            "symbol": symbol,
+            "symbol_name": name,
+            "market": row.get("market"),
+            "source": "file_map",
+        }
+
+    if db is not None:
+        for symbol, symbol_name in db.execute(select(WatchlistItem.symbol, WatchlistItem.symbol_name).distinct()).all():
+            if not isinstance(symbol, str) or len(symbol) != 6 or not symbol.isdigit():
+                continue
+            if not isinstance(symbol_name, str) or not symbol_name.strip():
+                continue
+            if symbol in candidates:
+                continue
+            candidates[symbol] = {
+                "symbol": symbol,
+                "symbol_name": symbol_name.strip(),
+                "market": None,
+                "source": "watchlist_db",
+            }
+
+    for symbol, symbol_name in _FALLBACK_SYMBOLS.items():
+        if symbol in candidates:
+            continue
+        candidates[symbol] = {
+            "symbol": symbol,
+            "symbol_name": symbol_name,
+            "market": None,
+            "source": "fallback_map",
+        }
+
+    scored: list[tuple[tuple[int, int, str], dict[str, str | None]]] = []
+    for row in candidates.values():
+        symbol = str(row["symbol"])
+        symbol_name = str(row["symbol_name"])
+        source = str(row["source"])
+
+        score = 99
+        if normalized_digits:
+            if symbol == normalized_digits and len(normalized_digits) == 6:
+                score = 0
+            elif symbol.startswith(normalized_digits):
+                score = 1
+            elif normalized_name in symbol_name.casefold():
+                score = 4
+            else:
+                continue
+        else:
+            name_folded = symbol_name.casefold()
+            if name_folded == normalized_name:
+                score = 2
+            elif name_folded.startswith(normalized_name):
+                score = 3
+            elif normalized_name in name_folded:
+                score = 4
+            elif symbol.startswith(cleaned):
+                score = 5
+            else:
+                continue
+
+        scored.append(((score, _SOURCE_PRIORITY.get(source, 9), symbol), row))
+
+    scored.sort(key=lambda entry: entry[0])
+    return [row for _, row in scored[:limit]]

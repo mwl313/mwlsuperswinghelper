@@ -332,3 +332,105 @@ Security handling (private-use baseline):
 - no localStorage for credentials
 - no plaintext secret echo from backend
 - server-side persistence only
+
+## 13) Position Layer Recovery Minimum-Change Plan
+Scope references:
+- `README.md` (existing frontend/API expectations)
+- `doc/kospi_swing_signal_spec_beginner_side_hustle.md`
+- `doc/superswinghelper_roadmap_checklist.md`
+
+Current gap summary:
+- Frontend types/API already expect position fields and `/positions` endpoints.
+- Backend currently has no `Position` model/service/router.
+- `watchlist` add payload and `/watchlist/live` response are not position-aware yet.
+
+Recovery strategy (minimal-change):
+1. Backend data model and schemas
+- Add `Position` model with one row per `(user_id, symbol)` and open/closed state.
+- Enforce required rules:
+  - `holding_state` required
+  - when `holding`: `entry_price` and integer `quantity` required
+  - optional stop/take values must be `> 0` if provided
+- Add `position` schemas and extend watchlist/dashboard schemas accordingly.
+
+2. Backend service and API
+- Add `services/positions.py` for:
+  - upsert/close/get/list
+  - `pnl_percent` / `pnl_amount` calculation from current price
+  - default not-holding summary construction
+- Add routes:
+  - `GET /api/positions`
+  - `GET /api/positions/{symbol}`
+  - `PATCH /api/positions/{symbol}`
+  - `POST /api/positions/{symbol}/close`
+- Extend `POST /api/watchlists/{id}/items` to accept holding payload and create/close position.
+- Extend `/api/watchlist/live` to include position summary fields for each row.
+
+3. Frontend recovery
+- Watchlist add form:
+  - require `보유여부`
+  - if `보유중`: require `진입가` + integer `수량`
+  - include optional stop/take/note
+- Add reusable position edit modal (watchlist row + chart tab entry shared).
+- Show compact position summary in watchlist rows and keep chart summary synced.
+- Wire chart `onOpenPositionEditor(symbol)` to open same modal directly.
+
+4. Verification and docs
+- Add backend tests for position service validation/upsert/close/pnl.
+- Keep existing chart/signal/provider behavior unchanged.
+- Update README position section to match restored validation rules and flows.
+
+## 14) Symbol Code + Name Search Minimum-Change Plan
+Scope references:
+- `README.md`
+- `apps/web/app/page.tsx`
+- `apps/web/lib/api.ts`
+- `services/api/app/api/symbols.py`
+- `services/api/app/services/symbol_lookup.py`
+
+Goal:
+- Keep canonical watchlist storage as 6-digit symbol code.
+- Extend UX so users can search/add by code or Korean stock name.
+
+Backend plan:
+1. Keep `GET /api/symbols/resolve` unchanged.
+2. Add `GET /api/symbols/search?q=...&limit=...`.
+3. Reuse existing KRX file-map + fallback map + watchlist DB names.
+4. Return compact rows: `symbol`, `symbol_name`, `market`, `source`.
+5. Keep deterministic ranking:
+- exact code > code prefix > exact/startswith/contains name.
+
+Frontend plan:
+1. Change watchlist add input to text query (`종목코드 또는 종목명`).
+2. Add suggestion list and explicit selection UX.
+3. Keep exact 6-digit code path via `resolve`.
+4. Use new search API for name/partial queries.
+5. Submit only selected canonical code + name.
+6. Disable add until symbol is selected and holding validations pass.
+
+## 15) Historical Backfill / Older Continuation Minimum-Change Plan
+Scope references:
+- `services/api/app/api/chart.py`
+- `services/api/app/services/chart_data.py`
+- `services/api/app/workers/runtime.py`
+- `services/api/app/services/market_data/kis_adapter.py`
+- `apps/web/components/chart/ChartSection.tsx`
+
+Goal:
+- Extend chart history left side without changing canonical model.
+- Keep `1m` persisted candles as source of truth and aggregate higher frames from `1m`.
+
+Backend plan:
+1. Add chart API `before` query parameter.
+2. Query persisted candles older than `before` (exclusive), still ascending in response.
+3. Keep overlays computed from final returned candle slice.
+4. Keep current in-memory candle merge only for newest page (`before` absent).
+5. Extend KIS history seed to multi-chunk backfill using `before` cursor and upsert into `candles_1m`.
+6. Keep duplicate-safe storage by existing unique key and upsert behavior.
+
+Frontend plan:
+1. Add `이전 데이터 더 보기` action in chart panel.
+2. Request older chunk via `GET /api/chart/{symbol}?before=...`.
+3. Prepend older candles, dedupe by timestamp, keep ascending order.
+4. Recompute overlays on merged candles and preserve current live update path.
+5. Keep timeframe selector and websocket behavior unchanged.

@@ -111,6 +111,13 @@ export type SymbolResolveResult = {
   source: string;
 };
 
+export type SymbolSearchResult = {
+  symbol: string;
+  symbol_name: string;
+  market: string | null;
+  source: string;
+};
+
 export type ChartCandle = {
   timestamp: string;
   open: number;

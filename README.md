@@ -17,6 +17,7 @@
 - 종목코드(6자리) 입력 시 종목명 자동 조회 강화
   - 파일 기반 KRX 심볼맵(`services/api/app/data/krx_symbol_map.json`) 우선 조회
   - 조회 API: `GET /api/symbols/resolve?symbol=005930`
+  - 검색 API: `GET /api/symbols/search?q=삼성` (코드 prefix/종목명 부분검색 지원)
 - 브라우저는 `http://localhost:3000`만 접속하면 됨 (`/api`, `/ws`는 Next 리라이트 프록시)
 - Phase 1 UI 정보구조 정리 완료(기능 추가 없음)
   - 메인 화면을 `개요 / 워치리스트 / 차트 / 시그널 / 설정` 탭으로 분리
@@ -41,6 +42,10 @@
   - 중복 방지 키: `(symbol, timeframe, timestamp)` unique
   - 차트 API는 저장소 closed candles + 메모리 current candle을 병합해 응답
   - 백엔드 재시작 후에도 기존 closed candles 히스토리 복구 가능
+- 과거 구간 백필/연장 로드(히스토리 확장)
+  - KIS 모드 시 시드 단계에서 과거 1분봉을 여러 청크로 backfill 후 `candles_1m`에 저장
+  - 차트 API `before` 파라미터로 현재 구간보다 이전 캔들 청크 조회 가능
+  - 차트 탭의 `이전 데이터 더 보기` 버튼으로 과거 구간을 왼쪽에 이어붙임(중복 제거)
 - 차트 탭 UI 폴리시(정보구조/가독성 개선, 기능 유지)
   - 대형 요약 카드 대신 종목 헤더 바(종목/현재가/변동률/최근 시그널/마지막 반영 시간)
   - 체크박스 중심 조작부를 컴팩트 툴바(심볼 선택, RSI/시그널 토글, 새로고침)로 정리
@@ -167,6 +172,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - `POST /api/watchlists/{id}/items`
 - `PATCH /api/watchlists/items/{itemId}`
 - `GET /api/symbols/resolve?symbol=005930`
+- `GET /api/symbols/search?q=삼성&limit=10`
 - `GET /api/watchlist/live`
 - `GET /api/settings`
 - `PUT /api/settings`
@@ -175,6 +181,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - `DELETE /api/signals?symbol=005930`
 - `DELETE /api/signals/{id}`
 - `GET /api/chart/{symbol}?limit=240&timeframe=1m|5m|15m|1h`
+- `GET /api/chart/{symbol}?limit=240&timeframe=1m|5m|15m|1h&before=2026-03-17T09:00:00+09:00`
 - `GET /api/positions`
 - `GET /api/positions/{symbol}`
 - `PATCH /api/positions/{symbol}`
@@ -193,6 +200,7 @@ curl "http://127.0.0.1:8000/api/chart/005930?limit=240&timeframe=5m"
 - `candles`: 선택한 timeframe 기준 OHLCV 배열 (`1m`, `5m`, `15m`, `1h`)
 - `overlays`: `ma20`, `ma60`, `bollinger_upper/mid/lower`, `rsi14` 시계열
 - `markers`: 최근 시그널 로그의 차트 마커(매수 후보/돌파 감시/매도 경고)
+- `before` 사용 시: 기준 시각 이전 구간을 반환(기준 시각은 제외), 응답 캔들은 오름차순 유지
 
 timeframe 집계 규칙:
 - 소스: persisted `1m` closed candles + 메모리 current `1m` candle
@@ -201,6 +209,13 @@ timeframe 집계 규칙:
 - `low`: 구간 최저 low
 - `close`: 구간 마지막 close
 - `volume`: 구간 volume 합
+
+과거 히스토리 백필/연장 조회:
+- canonical 저장소는 계속 `1m`(`candles_1m`) 하나만 사용
+- `5m/15m/1h`는 조회 시점에 `1m`를 집계해서 생성
+- KIS 모드에서는 `KIS_HISTORY_BACKFILL_CHUNKS`(기본 3)만큼 과거 청크를 시드 단계에서 추가 적재
+- 차트 탭 `이전 데이터 더 보기`는 `before` 기반으로 과거 청크를 prepend
+- 중복 키 `(symbol, timeframe, timestamp)`로 중복 저장 방지
 
 실시간 차트 이벤트(WS):
 - `candle_update`: 진행 중 1분봉 OHLCV 갱신
@@ -302,6 +317,7 @@ KIS 모드 실행(권장: UI):
 - `KIS_BASE_URL`
 - `KIS_POLL_INTERVAL_SECONDS`
 - `KIS_HISTORY_SEED_LIMIT`
+- `KIS_HISTORY_BACKFILL_CHUNKS`
 - `KIS_QUOTE_TR_ID`
 - `KIS_INTRADAY_TR_ID`
 
@@ -349,6 +365,7 @@ KIS 모드 동작 방식(MVP):
 2. 프론트 실행 후 대시보드에서 워치리스트/시그널 로그가 보이는지 확인
 3. 1~2분 내 mock 데이터로 시그널이 누적되는지 확인
 4. 워치리스트 입력칸에 6자리 종목코드를 입력하면 종목명이 자동으로 표시되는지 확인
+4-1. 워치리스트 입력칸에서 종목명(예: `삼성`, `삼성전자`) 검색 결과 목록이 나오고 선택 후 추가되는지 확인
 5. 차트 탭에서 초기 REST 로드 후 `candle_update`/`candle_closed` 이벤트에 따라 현재 봉이 갱신되고 새 봉이 추가되는지 확인
 6. 백엔드 재시작 후에도 `GET /api/chart/{symbol}`에서 이전 closed candles가 유지되는지 확인
 7. 워치리스트 종목 추가 시 `미보유/보유중`을 선택해야 저장되는지 확인

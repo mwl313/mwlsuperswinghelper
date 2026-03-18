@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, Path, Query
 from sqlalchemy.orm import Session
 
@@ -14,7 +16,8 @@ def get_chart_data(
     symbol: str = Path(..., pattern=r"^\d{6}$"),
     limit: int = Query(default=240, ge=60, le=1000),
     timeframe: ChartTimeframe = Query(default="1m"),
+    before: datetime | None = Query(default=None),
     runtime: MarketRuntime = Depends(get_runtime),
     db: Session = Depends(db_session),
 ) -> ChartResponse:
-    return get_chart_response(symbol=symbol, limit=limit, timeframe=timeframe, runtime=runtime, db=db)
+    return get_chart_response(symbol=symbol, limit=limit, timeframe=timeframe, runtime=runtime, db=db, before=before)

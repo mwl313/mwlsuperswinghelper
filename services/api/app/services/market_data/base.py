@@ -26,5 +26,5 @@ class MarketDataProvider(Protocol):
     async def get_ticks(self, symbols: list[str]) -> list[Tick]:
         ...
 
-    async def get_recent_candles(self, symbol: str, limit: int) -> list[MarketCandle]:
+    async def get_recent_candles(self, symbol: str, limit: int, before: datetime | None = None) -> list[MarketCandle]:
         ...

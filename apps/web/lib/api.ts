@@ -12,6 +12,7 @@ import {
   SignalBulkDeleteResult,
   SignalDeleteOneResult,
   SignalLog,
+  SymbolSearchResult,
   StrategySettings,
   SymbolResolveResult,
   Watchlist,
@@ -107,6 +108,10 @@ export function resolveSymbol(symbol: string) {
   return request<SymbolResolveResult>(`/symbols/resolve?symbol=${symbol}`);
 }
 
+export function searchSymbols(query: string, limit = 10) {
+  return request<SymbolSearchResult[]>(`/symbols/search?q=${encodeURIComponent(query)}&limit=${limit}`);
+}
+
 export function updateSettings(payload: Omit<StrategySettings, "id" | "user_id" | "created_at" | "updated_at">) {
   return request<StrategySettings>("/settings", {
     method: "PUT",
@@ -114,8 +119,9 @@ export function updateSettings(payload: Omit<StrategySettings, "id" | "user_id" 
   });
 }
 
-export function getChart(symbol: string, limit = 240, timeframe: "1m" | "5m" | "15m" | "1h" = "1m") {
-  return request<ChartResponse>(`/chart/${symbol}?limit=${limit}&timeframe=${timeframe}`);
+export function getChart(symbol: string, limit = 240, timeframe: "1m" | "5m" | "15m" | "1h" = "1m", before?: string) {
+  const beforeQuery = before ? `&before=${encodeURIComponent(before)}` : "";
+  return request<ChartResponse>(`/chart/${symbol}?limit=${limit}&timeframe=${timeframe}${beforeQuery}`);
 }
 
 export function getPositions() {

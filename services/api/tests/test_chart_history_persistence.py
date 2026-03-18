@@ -125,6 +125,24 @@ class ChartHistoryPersistenceTests(unittest.TestCase):
         self.assertAlmostEqual(first.close, 104.5)
         self.assertAlmostEqual(first.volume, 1000 + 1001 + 1002 + 1003 + 1004)
 
+    def test_chart_response_before_returns_older_slice(self) -> None:
+        base = datetime(2026, 3, 16, 0, 0, tzinfo=timezone.utc)
+        with self.SessionLocal() as db:
+            self._insert_closed_rows(db, base, 20)
+            runtime = _FakeRuntime(current=None)
+            response = get_chart_response(
+                symbol="005930",
+                limit=5,
+                timeframe="1m",
+                runtime=runtime,
+                db=db,
+                before=base + timedelta(minutes=10),
+            )
+
+        self.assertEqual(len(response.candles), 5)
+        self.assertEqual(response.candles[0].timestamp, base + timedelta(minutes=5))
+        self.assertEqual(response.candles[-1].timestamp, base + timedelta(minutes=9))
+
 
 if __name__ == "__main__":
     unittest.main()

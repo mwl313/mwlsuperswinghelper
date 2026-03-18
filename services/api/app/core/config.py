@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     kis_market_div_code: str = "J"
     kis_quote_tr_id: str = "FHKST01010100"
     kis_intraday_tr_id: str = "FHKST03010200"
+    kis_history_backfill_chunks: int = Field(default=3, ge=1, le=20)
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
 

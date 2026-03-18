@@ -326,6 +326,93 @@ class MarketRuntime:
             db.commit()
 
     @staticmethod
+    def _normalize_ts(ts: datetime) -> datetime:
+        if ts.tzinfo is None:
+            return ts.replace(tzinfo=timezone.utc)
+        return ts.astimezone(timezone.utc)
+
+    def _upsert_market_candles(self, symbol: str, rows: list[MarketCandle]) -> int:
+        if not rows:
+            return 0
+
+        upper_bound = self._history_upper_time_bound()
+        normalized_rows: list[MarketCandle] = []
+        seen: set[datetime] = set()
+        for row in rows:
+            ts = self._normalize_ts(row.timestamp)
+            if ts > upper_bound:
+                continue
+            if ts in seen:
+                continue
+            seen.add(ts)
+            normalized_rows.append(
+                MarketCandle(
+                    symbol=symbol,
+                    timestamp=ts,
+                    open=row.open,
+                    high=row.high,
+                    low=row.low,
+                    close=row.close,
+                    volume=row.volume,
+                )
+            )
+
+        if not normalized_rows:
+            return 0
+
+        with SessionLocal() as db:
+            timestamps = [row.timestamp for row in normalized_rows]
+            existing_rows = {
+                self._normalize_ts(row.timestamp): row
+                for row in db.scalars(
+                    select(CandleHistory).where(
+                        CandleHistory.symbol == symbol,
+                        CandleHistory.timeframe == "1m",
+                        CandleHistory.timestamp.in_(timestamps),
+                    )
+                ).all()
+            }
+
+            affected = 0
+            for row in normalized_rows:
+                existing = existing_rows.get(row.timestamp)
+                if existing is None:
+                    db.add(
+                        CandleHistory(
+                            symbol=symbol,
+                            timeframe="1m",
+                            timestamp=row.timestamp,
+                            open=row.open,
+                            high=row.high,
+                            low=row.low,
+                            close=row.close,
+                            volume=row.volume,
+                        )
+                    )
+                    affected += 1
+                    continue
+
+                if (
+                    existing.open == row.open
+                    and existing.high == row.high
+                    and existing.low == row.low
+                    and existing.close == row.close
+                    and existing.volume == row.volume
+                ):
+                    continue
+
+                existing.open = row.open
+                existing.high = row.high
+                existing.low = row.low
+                existing.close = row.close
+                existing.volume = row.volume
+                affected += 1
+
+            db.commit()
+
+        return affected
+
+    @staticmethod
     def _history_upper_time_bound() -> datetime:
         # Guardrail: treat candles too far in the future as invalid noise.
         return datetime.now(timezone.utc) + timedelta(minutes=2)
@@ -382,12 +469,63 @@ class MarketRuntime:
             for row in rows
         ]
 
+    def _load_oldest_closed_candle_timestamp(self, symbol: str) -> datetime | None:
+        upper_bound = self._history_upper_time_bound()
+        with SessionLocal() as db:
+            row = db.scalar(
+                select(CandleHistory)
+                .where(
+                    CandleHistory.symbol == symbol,
+                    CandleHistory.timeframe == "1m",
+                    CandleHistory.timestamp <= upper_bound,
+                )
+                .order_by(CandleHistory.timestamp.asc())
+                .limit(1)
+            )
+            if row is None:
+                return None
+            return self._normalize_ts(row.timestamp)
+
+    async def _backfill_older_1m_history(self, symbol: str, max_chunks: int) -> None:
+        if max_chunks <= 0:
+            return
+
+        cursor = self._load_oldest_closed_candle_timestamp(symbol)
+        if cursor is None:
+            return
+
+        for _ in range(max_chunks):
+            try:
+                fetched = await self.provider.get_recent_candles(
+                    symbol=symbol,
+                    limit=self.settings.kis_history_seed_limit,
+                    before=cursor,
+                )
+            except Exception as exc:
+                logger.warning("older history backfill failed for %s: %s", symbol, exc)
+                return
+
+            if not fetched:
+                return
+
+            older_rows = [row for row in fetched if self._normalize_ts(row.timestamp) < cursor]
+            if not older_rows:
+                return
+
+            self._upsert_market_candles(symbol=symbol, rows=older_rows)
+            next_cursor = min(self._normalize_ts(row.timestamp) for row in older_rows)
+            if next_cursor >= cursor:
+                return
+            cursor = next_cursor
+
     async def _seed_symbol_history(self, symbol: str) -> None:
-        persisted = self._load_recent_closed_candles(symbol=symbol, limit=self.settings.kis_history_seed_limit)
+        backfill_chunks = max(1, self.settings.kis_history_backfill_chunks)
+        target_limit = self.settings.kis_history_seed_limit * backfill_chunks
+        persisted = self._load_recent_closed_candles(symbol=symbol, limit=target_limit)
         if persisted and isinstance(self.provider, MockMarketDataProvider):
             self.provider.align_virtual_time(persisted[-1].timestamp)
 
-        if len(persisted) >= min(self.settings.kis_history_seed_limit, 60):
+        if len(persisted) >= min(target_limit, 60):
             self.aggregator.seed_closed_candles(symbol=symbol, candles=persisted)
             self.history_seeded_symbols.add(symbol)
             return
@@ -399,20 +537,12 @@ class MarketRuntime:
             logger.warning("history seed fetch failed for %s: %s", symbol, exc)
             fetched_rows = []
 
-        for row in fetched_rows:
-            self._upsert_closed_candle(
-                Candle(
-                    symbol=row.symbol,
-                    timestamp=row.timestamp,
-                    open=row.open,
-                    high=row.high,
-                    low=row.low,
-                    close=row.close,
-                    volume=row.volume,
-                )
-            )
+        self._upsert_market_candles(symbol=symbol, rows=fetched_rows)
 
-        merged = self._load_recent_closed_candles(symbol=symbol, limit=self.settings.kis_history_seed_limit)
+        if backfill_chunks > 1:
+            await self._backfill_older_1m_history(symbol=symbol, max_chunks=backfill_chunks - 1)
+
+        merged = self._load_recent_closed_candles(symbol=symbol, limit=target_limit)
         if merged and isinstance(self.provider, MockMarketDataProvider):
             self.provider.align_virtual_time(merged[-1].timestamp)
         if merged:

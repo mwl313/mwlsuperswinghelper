@@ -6,3 +6,10 @@ class SymbolResolveResponse(BaseModel):
     symbol_name: str | None = None
     found: bool
     source: str
+
+
+class SymbolSearchItem(BaseModel):
+    symbol: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+    symbol_name: str
+    market: str | None = None
+    source: str

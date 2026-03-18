@@ -23,6 +23,7 @@ import {
   getSummary,
   getWatchlists,
   resolveSymbol,
+  searchSymbols,
   saveKisCredentials,
   switchProviderMode,
   testProviderConnection,
@@ -39,6 +40,7 @@ import {
   PositionUpsertPayload,
   SignalLog,
   SignalType,
+  SymbolSearchResult,
   StrategySettings,
   Watchlist,
   WatchlistItem,
@@ -100,9 +102,11 @@ export default function HomePage() {
   const [newStopLossPrice, setNewStopLossPrice] = useState("");
   const [newTakeProfitPrice, setNewTakeProfitPrice] = useState("");
   const [newNote, setNewNote] = useState("");
+  const [selectedAddSymbol, setSelectedAddSymbol] = useState<SymbolSearchResult | null>(null);
+  const [symbolSuggestions, setSymbolSuggestions] = useState<SymbolSearchResult[]>([]);
   const [resolvedSymbolName, setResolvedSymbolName] = useState<string | null>(null);
   const [isResolvingSymbol, setIsResolvingSymbol] = useState(false);
-  const [symbolLookupMessage, setSymbolLookupMessage] = useState("6자리 종목코드를 입력하세요.");
+  const [symbolLookupMessage, setSymbolLookupMessage] = useState("종목코드 또는 종목명을 입력하세요.");
   const [editingPositionSymbol, setEditingPositionSymbol] = useState<string | null>(null);
   const [positionModalSaving, setPositionModalSaving] = useState(false);
   const [signalDeleting, setSignalDeleting] = useState(false);
@@ -143,7 +147,7 @@ export default function HomePage() {
 
   const isHoldingAdd = newHoldingState === "holding";
   const canSubmitAdd = useMemo(() => {
-    if (newSymbol.length !== 6 || !resolvedSymbolName || isResolvingSymbol) {
+    if (!selectedAddSymbol || !resolvedSymbolName || isResolvingSymbol) {
       return false;
     }
     if (!newHoldingState) {
@@ -155,7 +159,7 @@ export default function HomePage() {
       return Number.isFinite(entry) && entry > 0 && Number.isInteger(qty) && qty >= 1;
     }
     return true;
-  }, [newSymbol, resolvedSymbolName, isResolvingSymbol, newHoldingState, isHoldingAdd, newEntryPrice, newQuantity]);
+  }, [selectedAddSymbol, resolvedSymbolName, isResolvingSymbol, newHoldingState, isHoldingAdd, newEntryPrice, newQuantity]);
 
   const editingPositionLiveRow = useMemo(() => {
     if (!editingPositionSymbol) return null;
@@ -255,16 +259,13 @@ export default function HomePage() {
   }, [activeTab]);
 
   useEffect(() => {
-    const sanitized = newSymbol.replace(/\D/g, "").slice(0, 6);
-    if (sanitized !== newSymbol) {
-      setNewSymbol(sanitized);
-      return;
-    }
-
-    if (sanitized.length < 6) {
+    const query = newSymbol.trim();
+    if (!query) {
       setResolvedSymbolName(null);
+      setSelectedAddSymbol(null);
+      setSymbolSuggestions([]);
       setIsResolvingSymbol(false);
-      setSymbolLookupMessage("6자리 종목코드를 입력하세요.");
+      setSymbolLookupMessage("종목코드 또는 종목명을 입력하세요.");
       return;
     }
 
@@ -272,18 +273,54 @@ export default function HomePage() {
     const timer = setTimeout(async () => {
       setIsResolvingSymbol(true);
       try {
-        const resolved = await resolveSymbol(sanitized);
-        if (!active) return;
-        if (resolved.found && resolved.symbol_name) {
-          setResolvedSymbolName(resolved.symbol_name);
-          setSymbolLookupMessage(`종목명: ${resolved.symbol_name}`);
+        if (/^\d{6}$/.test(query)) {
+          const resolved = await resolveSymbol(query);
+          if (!active) return;
+          if (resolved.found && resolved.symbol_name) {
+            const selected = {
+              symbol: resolved.symbol,
+              symbol_name: resolved.symbol_name,
+              market: null,
+              source: resolved.source,
+            };
+            setResolvedSymbolName(resolved.symbol_name);
+            setSelectedAddSymbol(selected);
+            setSymbolSuggestions([selected]);
+            setSymbolLookupMessage(`종목명: ${resolved.symbol_name}`);
+          } else {
+            setResolvedSymbolName(null);
+            setSelectedAddSymbol(null);
+            setSymbolSuggestions([]);
+            setSymbolLookupMessage("종목코드를 찾지 못했습니다. 코드를 다시 확인해주세요.");
+          }
         } else {
-          setResolvedSymbolName(null);
-          setSymbolLookupMessage("종목코드를 찾지 못했습니다. 코드를 다시 확인해주세요.");
+          const results = await searchSymbols(query, 10);
+          if (!active) return;
+
+          setSymbolSuggestions(results);
+          if (results.length === 0) {
+            setResolvedSymbolName(null);
+            setSelectedAddSymbol(null);
+            setSymbolLookupMessage("검색 결과가 없습니다. 종목코드 또는 종목명을 다시 확인해주세요.");
+            return;
+          }
+
+          const exact = results.find((item) => item.symbol === query || item.symbol_name === query) ?? null;
+          if (exact) {
+            setSelectedAddSymbol(exact);
+            setResolvedSymbolName(exact.symbol_name);
+            setSymbolLookupMessage(`종목명: ${exact.symbol_name}`);
+          } else {
+            setSelectedAddSymbol(null);
+            setResolvedSymbolName(null);
+            setSymbolLookupMessage(`검색 결과 ${results.length}건. 목록에서 종목을 선택해주세요.`);
+          }
         }
       } catch {
         if (!active) return;
         setResolvedSymbolName(null);
+        setSelectedAddSymbol(null);
+        setSymbolSuggestions([]);
         setSymbolLookupMessage("종목명 조회 중 오류가 발생했습니다.");
       } finally {
         if (active) setIsResolvingSymbol(false);
@@ -347,9 +384,27 @@ export default function HomePage() {
     return () => ws.close();
   }, [settings?.enable_desktop_notifications]);
 
+  function onChangeSymbolInput(value: string) {
+    setNewSymbol(value);
+    setSelectedAddSymbol(null);
+    setResolvedSymbolName(null);
+    setSymbolSuggestions([]);
+  }
+
+  function onSelectAddSymbol(item: SymbolSearchResult) {
+    setSelectedAddSymbol(item);
+    setResolvedSymbolName(item.symbol_name);
+    setSymbolLookupMessage(`선택됨: ${item.symbol_name} (${item.symbol})`);
+    setNewSymbol(item.symbol_name);
+  }
+
   async function onAddSymbol(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!currentWatchlist) return;
+    if (!selectedAddSymbol) {
+      setError("종목코드 또는 종목명을 검색해 목록에서 종목을 선택해주세요.");
+      return;
+    }
     if (!newHoldingState) {
       setError("보유여부를 선택해주세요.");
       return;
@@ -361,6 +416,7 @@ export default function HomePage() {
 
     const payload: {
       symbol: string;
+      symbol_name?: string;
       enabled: boolean;
       holding_state: HoldingState;
       entry_price?: number | null;
@@ -369,7 +425,8 @@ export default function HomePage() {
       take_profit_price?: number | null;
       note?: string | null;
     } = {
-      symbol: newSymbol.trim(),
+      symbol: selectedAddSymbol.symbol,
+      symbol_name: selectedAddSymbol.symbol_name,
       enabled: true,
       holding_state: newHoldingState,
     };
@@ -392,7 +449,9 @@ export default function HomePage() {
       setNewTakeProfitPrice("");
       setNewNote("");
       setResolvedSymbolName(null);
-      setSymbolLookupMessage("6자리 종목코드를 입력하세요.");
+      setSelectedAddSymbol(null);
+      setSymbolSuggestions([]);
+      setSymbolLookupMessage("종목코드 또는 종목명을 입력하세요.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "종목 추가 실패");
     }
@@ -584,11 +643,14 @@ export default function HomePage() {
           newStopLossPrice={newStopLossPrice}
           newTakeProfitPrice={newTakeProfitPrice}
           newNote={newNote}
+          selectedSymbol={selectedAddSymbol}
+          symbolSuggestions={symbolSuggestions}
           resolvedSymbolName={resolvedSymbolName}
           isResolvingSymbol={isResolvingSymbol}
           symbolLookupMessage={symbolLookupMessage}
           canSubmitAdd={canSubmitAdd}
-          onSymbolChange={setNewSymbol}
+          onSymbolChange={onChangeSymbolInput}
+          onSelectSymbol={onSelectAddSymbol}
           onHoldingStateChange={setNewHoldingState}
           onEntryPriceChange={setNewEntryPrice}
           onQuantityChange={setNewQuantity}
